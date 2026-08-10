@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PiForge — the agent that understands live hardware state</title>
+    <meta
+      name="description"
+      content="A coding harness for Raspberry Pi 5 that closes the loop between your code and the live sensor / GPIO / I2C state. Fixes the bugs that look like broken hardware but are really numbering, address, library, or config issues."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="assets/style.css" />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%233b82f6'/%3E%3Ctext x='50' y='70' font-size='60' text-anchor='middle' fill='white' font-family='monospace' font-weight='700'%3Eπ%3C/text%3E%3C/svg%3E"
+    />
+  </head>
+  <body>
+    <nav>
+      <div class="container">
+        <a href="#" class="logo">
+          <span class="logo-mark">π</span>
+          PiForge
+        </a>
+        <ul>
+          <li><a href="#features">Features</a></li>
+          <li><a href="#docs">Docs</a></li>
+          <li><a href="#eval">The Gate</a></li>
+          <li>
+            <a
+              href="https://github.com/nitishagar/piforge"
+              class="nav-cta"
+              target="_blank"
+              rel="noopener"
+              >GitHub</a
+            >
+          </li>
+        </ul>
+      </div>
+    </nav>
+
+    <section class="hero">
+      <div class="container">
+        <div class="badge">
+          <span class="dot"></span>
+          Built for Raspberry Pi 5 · pure Go · Apache-2.0
+        </div>
+        <h1>
+          The agent that understands<br />
+          <span class="grad">live hardware state</span>
+        </h1>
+        <p>
+          A coding harness for Raspberry Pi 5 that closes the loop between your
+          code and the live sensor / GPIO / I2C state. It diagnoses and fixes
+          the bugs that <em>look</em> like broken hardware but are really
+          numbering, address, library, or config issues — and correctly triages
+          the rest as hardware faults.
+        </p>
+
+        <div class="install">
+          <div class="install-tabs">
+            <button class="install-tab active" data-cmd="go">go</button>
+            <button class="install-tab" data-cmd="build">build</button>
+            <button class="install-tab" data-cmd="curl">curl</button>
+          </div>
+          <div class="code-block">
+            <span class="prompt">$</span>
+            <span class="cmd">go install github.com/nitishagar/piforge/cmd/piforge@latest</span>
+            <button class="copy-btn">copy</button>
+          </div>
+        </div>
+
+        <div class="cta-row">
+          <a
+            href="https://github.com/nitishagar/piforge"
+            class="btn btn-primary"
+            target="_blank"
+            rel="noopener"
+          >
+            View on GitHub →
+          </a>
+          <a href="#docs" class="btn btn-secondary">Read the docs</a>
+        </div>
+      </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <section id="features">
+      <div class="container">
+        <div class="section-title">
+          <h2>Why PiForge</h2>
+        </div>
+        <p class="section-subtitle">
+          The durable moat: typed sensor reads with units/ranges and
+          sub-millisecond time-series correlation that can't cross a WAN —
+          instead of parsing ASCII from <code>i2cdetect</code> over SSH.
+        </p>
+
+        <div class="features">
+          <div class="feature">
+            <div class="feature-icon">📡</div>
+            <h3>Typed HIL tools</h3>
+            <p>
+              GPIO, I2C, telemetry, and code-edit tools return structured
+              values with units and nominal ranges — so the model reasons about
+              the actual hardware state instead of grepping logs.
+            </p>
+          </div>
+          <div class="feature">
+            <div class="feature-icon">〰️</div>
+            <h3>Sub-ms scope</h3>
+            <p>
+              Edge-event capture via the kernel character device catches the
+              glitches a single sample misses. The capability cloud-over-SSH
+              genuinely can't match.
+            </p>
+          </div>
+          <div class="feature">
+            <div class="feature-icon">🛡️</div>
+            <h3>Safety-first broker</h3>
+            <p>
+              Reads are always safe. GPIO writes and physical ops are Class I —
+              per-action human approval, risk-tiered, scoped. The under-voltage
+              bit is a hard STOP before any load.
+            </p>
+          </div>
+          <div class="feature">
+            <div class="feature-icon">⚡</div>
+            <h3>Pure-Go, one binary</h3>
+            <p>
+              No CGo. Cross-compiles to a single static <code>linux/arm64</code>
+              binary (~6 MB) you drop on the Pi. Built on llama.cpp's
+              OpenAI-compatible server.
+            </p>
+          </div>
+          <div class="feature">
+            <div class="feature-icon">🎯</div>
+            <h3>Honest about limits</h3>
+            <p>
+              Fixes ~25–35% of "hardware feels broken" bugs in code/config.
+              Correctly triages the rest as real hardware faults. Blind spot:
+              analog/scope debugging (it can't see waveforms).
+            </p>
+          </div>
+          <div class="feature">
+            <div class="feature-icon">🔬</div>
+            <h3>Capability eval gate</h3>
+            <p>
+              Ships with a headless eval harness: run the model against
+              simulated fixtures and apply the 55% fix-rate / 10% hallucination
+              go/no-go rule before trusting it with real hardware.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <section id="docs">
+      <div class="container">
+        <div class="section-title">
+          <h2>Quick start</h2>
+        </div>
+        <p class="section-subtitle">
+          Start a local llama-server, point PiForge at it, give it a symptom.
+        </p>
+
+        <div class="docs-block">
+          <h3>1 · Start llama-server</h3>
+          <p>
+            Load a small model with the Qwen3 chat template and Q8 KV cache (the
+            cache-friendly prefix is the key cost lever on a slow Pi).
+          </p>
+          <pre><span class="c"># On the Pi 5 (8GB, NVMe, official Active Cooler)</span>
+llama-server -m qwen3-4b-instruct-2507-q4_k_m.gguf \
+  <span class="k">--jinja</span> --port 8080 -c <span class="s">8192</span> \
+  -ctk q8_0 -ctv q8_0</pre>
+        </div>
+
+        <div class="docs-block">
+          <h3>2 · Run the agent</h3>
+          <p>
+            Reads (<code>i2c</code>, <code>gpio get</code>, <code>scope</code>,
+            <code>telemetry</code>) are always safe. GPIO writes and I2C writes
+            are Class I and require per-action approval.
+          </p>
+          <pre><span class="c"># Add your user to the hardware groups once:</span>
+sudo usermod -aG gpio,i2c,spi,dialout $USER
+
+<span class="c"># Then:</span>
+./piforge --config piforge.toml \
+  --task <span class="s">"my BME280 keeps returning NaN for humidity"</span></pre>
+          <div class="callout">
+            <strong>Prompt-injection aware:</strong> tool output is treated as
+            inert data. Instructions inside sensor reads, dmesg, or file
+            contents are never obeyed — the agent only drives a pin because
+            <em>your</em> request requires it.
+          </div>
+        </div>
+
+        <div class="docs-block">
+          <h3>3 · The tool surface</h3>
+          <ul>
+            <li>
+              <code>hardware_inventory</code> — list detected I2C devices, GPIO
+              pins, board model. Call first to ground yourself.
+            </li>
+            <li>
+              <code>telemetry</code> — <code>vcgencmd</code> temp/volts +
+              decoded <code>get_throttled</code> bitmask (the under-voltage STOP
+              signal).
+            </li>
+            <li>
+              <code>i2c</code> — scan / detect / read with parsed values,
+              units, and both endian interpretations for 2-byte reads.
+            </li>
+            <li>
+              <code>gpio</code> — typed get/set over the RP1 character device.
+            </li>
+            <li>
+              <code>scope</code> — time-series edge capture (the moat).
+            </li>
+            <li>
+              <code>edit_file</code> — whole-file edits, sandboxed to the
+              workspace root.
+            </li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <div class="divider"></div>
+
+    <section id="eval">
+      <div class="container">
+        <div class="section-title">
+          <h2>The capability eval gate</h2>
+        </div>
+        <p class="section-subtitle">
+          No public benchmark covers hardware diagnosis. So before betting on
+          the local-appliance product, run the gate.
+        </p>
+
+        <div class="docs-block">
+          <p>
+            The eval runs cases headless: the agent's HIL tool calls are served
+            by a simulator driven by each case fixture, and edits land in a
+            per-case temp workspace the scorer reads back. A mock provider lets
+            the whole thing run in CI without a llama-server.
+          </p>
+          <pre><span class="c"># Headless CI run (scripted mock provider):</span>
+./piforge-eval --mock --config piforge.toml.example
+
+<span class="c"># Real model evaluation against a running llama-server:</span>
+./piforge-eval --config piforge.toml</pre>
+          <div class="callout">
+            <strong>Decision rule:</strong> ≥55% fix-rate AND &lt;10%
+            register/pin hallucination → <strong>BUILD_LOCAL</strong>. ~30% →
+            <strong>PIVOT_TO_CLOUD</strong>. The gate exists because the whole
+            product rests on an unvalidated assumption — that a ~4B model can
+            diagnose hardware faults from live state.
+          </div>
+        </div>
+
+        <div class="stats">
+          <div>
+            <div class="stat-num">6MB</div>
+            <div class="stat-label">static arm64 binary</div>
+          </div>
+          <div>
+            <div class="stat-num">0</div>
+            <div class="stat-label">CGo dependencies</div>
+          </div>
+          <div>
+            <div class="stat-num">12mA</div>
+            <div class="stat-label">RP1 per-pin max enforced</div>
+          </div>
+          <div>
+            <div class="stat-num">55/10</div>
+            <div class="stat-label">% gate thresholds</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <div class="container">
+        <p>Apache-2.0 · Raspberry Pi 5 · pure Go</p>
+        <ul>
+          <li>
+            <a
+              href="https://github.com/nitishagar/piforge"
+              target="_blank"
+              rel="noopener"
+              >GitHub</a
+            >
+          </li>
+          <li><a href="#docs">Docs</a></li>
+          <li><a href="#eval">Eval</a></li>
+        </ul>
+      </div>
+    </footer>
+
+    <script src="assets/app.js"></script>
+  </body>
+</html>

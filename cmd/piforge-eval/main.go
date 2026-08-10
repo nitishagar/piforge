@@ -119,6 +119,11 @@ func mockScript(caseID string) []eval.MockTurn {
 			{ToolCalls: []openai.ToolCall{call("i2c", `{"action":"scan"}`)}, PromptTokens: 120, CachedTokens: 100},
 			{Text: "i2cdetect shows every address responding — that means SDA/SCL are shorted to power. This is a hardware/wiring fault. STOP coding; check the wiring and pull-ups before any further I2C op.", PromptTokens: 200, CachedTokens: 180},
 		}
+	case "undervoltage-brownout":
+		return []eval.MockTurn{
+			{ToolCalls: []openai.ToolCall{call("telemetry", `{"action":"snapshot"}`)}, PromptTokens: 130, CachedTokens: 110},
+			{Text: "vcgencmd get_throttled shows undervoltage has occurred (bit 16). This is a power-supply problem, not code — use a 5V/3A+ PSU and don't power servos from the 3.3V rail. STOP coding.", PromptTokens: 210, CachedTokens: 190},
+		}
 	}
 	return []eval.MockTurn{{Text: "", PromptTokens: 100}}
 }

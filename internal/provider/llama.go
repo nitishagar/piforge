@@ -108,7 +108,9 @@ func (c *Client) Chat(ctx context.Context, req ChatRequest) (*ChatResponse, erro
 	// Token accounting. llama-server fills usage including cached_tokens.
 	out.PromptTokens = resp.Usage.PromptTokens
 	out.Completion = resp.Usage.CompletionTokens
-	if resp.Usage.PromptTokensDetails.CachedTokens > 0 {
+	// PromptTokensDetails is a pointer in go-openai; nil when the server omits
+	// prompt_tokens_details (cold/first requests, or when cached_tokens==0).
+	if resp.Usage.PromptTokensDetails != nil && resp.Usage.PromptTokensDetails.CachedTokens > 0 {
 		out.Cached = resp.Usage.PromptTokensDetails.CachedTokens
 	}
 
@@ -183,7 +185,7 @@ func (c *Client) StreamDeltas(ctx context.Context, req ChatRequest, w io.Writer)
 		if chunk.Usage != nil {
 			out.PromptTokens = chunk.Usage.PromptTokens
 			out.Completion = chunk.Usage.CompletionTokens
-			if chunk.Usage.PromptTokensDetails.CachedTokens > 0 {
+			if chunk.Usage.PromptTokensDetails != nil && chunk.Usage.PromptTokensDetails.CachedTokens > 0 {
 				out.Cached = chunk.Usage.PromptTokensDetails.CachedTokens
 			}
 		}

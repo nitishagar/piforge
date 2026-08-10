@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  # Native build + vet + tests on the runner host (ubuntu).
+  build-host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - name: Go module download
+        run: go mod download
+      - name: Vet
+        run: go vet ./...
+      - name: Test
+        run: go test -race ./...
+      - name: Build (host)
+        run: go build ./...
+
+  # Cross-compile to the Pi 5 target. Catches build-tag regressions and any
+  # accidental CGo dependency. This is the highest-value gate: it would catch a
+  # binary that fails to build for the actual deployment platform.
+  cross-compile-arm64:
+    runs-on: ubuntu-latest
+    env:
+      GOOS: linux
+      GOARCH: arm64
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - name: Vet (linux/arm64)
+        run: go vet ./...
+      - name: Build piforge (static, stripped)
+        run: go build -ldflags="-s -w" -o dist/piforge-arm64 ./cmd/piforge
+      - name: Build piforge-eval (static, stripped)
+        run: go build -ldflags="-s -w" -o dist/piforge-eval-arm64 ./cmd/piforge-eval
+      - name: Verify static ELF
+        run: |
+          file dist/piforge-arm64
+          file dist/piforge-eval-arm64
+
+  # Mock eval: exercises the runner, sim-served tools, broker gate, and scorer
+  # headless (no llama-server). Guards the harness plumbing end-to-end.
+  mock-eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - name: Build eval
+        run: go build -o /tmp/piforge-eval ./cmd/piforge-eval
+      - name: Run mock eval (scripted cases must pass)
+        run: /tmp/piforge-eval --mock --config piforge.toml.example

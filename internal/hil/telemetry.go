@@ -140,6 +140,13 @@ func throttled() (string, ThrottledBits, error) {
 	if err != nil {
 		return "", ThrottledBits{}, err
 	}
+	return throttledDecode(s)
+}
+
+// throttledDecode is the pure decode of a get_throttled string into bits.
+// Exposed so it can be unit-tested without shelling out to vcgencmd. Accepts
+// both the bare "0x10000" shape and vcgencmd's "throttled=0x10000" shape.
+func throttledDecode(s string) (string, ThrottledBits, error) {
 	s = strings.TrimSpace(s)
 	// vcgencmd prints e.g. "throttled=0x0" or just "0x0"
 	if i := strings.Index(s, "="); i >= 0 {

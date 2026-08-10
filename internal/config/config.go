@@ -102,9 +102,11 @@ type EvalConfig struct {
 
 // Load reads piforge.toml from path, then applies env-var overrides.
 // Missing fields are filled with defaults via WithDefaults.
+// Pass "" or "none" to skip the file and use defaults + env overrides only.
 func Load(path string) (*Config, error) {
 	c := Default()
-	if path == "" {
+	if path == "" || path == "none" {
+		c.applyEnv()
 		return c, nil
 	}
 	if _, err := toml.DecodeFile(path, c); err != nil {

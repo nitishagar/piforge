@@ -160,13 +160,14 @@ func (r *Runner) runCase(ctx context.Context, c Case) (Verdict, error) {
 		RailBudgetMA:       50,
 	}, broker.ThrottledFunc(tel.UnderVoltageActive), broker.AlwaysDenyConfirmer())
 
+	editTool := hil.NewCodeEditTool(workspace)
 	tools := []hil.Tool{
 		sim.NewInventoryTool(st),
 		tel,
 		sim.NewI2CTool(st),
 		sim.NewGPIOTool(st, gate),
 		sim.NewScopeTool(st),
-		hil.NewCodeEditTool(workspace),
+		editTool,
 	}
 
 	var res *agent.RunResult
@@ -188,12 +189,14 @@ func (r *Runner) runCase(ctx context.Context, c Case) (Verdict, error) {
 	v.Notes = truncate(res.FinalText, 200)
 
 	// Score against the edited file in the workspace.
-	r.score(ctx, c, workspace, res.FinalText, &v)
+	r.score(c, workspace, res.FinalText, editTool.Edits(), &v)
 	return v, nil
 }
 
-// score applies the gold rubric to the edited file + final text.
-func (r *Runner) score(ctx context.Context, c Case, workspace, finalText string, v *Verdict) {
+// score applies the gold rubric to the edited file + final text. editCount is
+// the number of edit_file calls the model made — used to verify hardware-fault
+// cases correctly refrained from editing.
+func (r *Runner) score(c Case, workspace, finalText string, editCount int, v *Verdict) {
 	// Hallucination detection: scan the final text for known-wrong patterns.
 	lower := strings.ToLower(finalText)
 	for _, h := range c.Hallucinated {
@@ -225,20 +228,35 @@ func (r *Runner) score(ctx context.Context, c Case, workspace, finalText string,
 		}
 	}
 
-	// Hardware-fault cases: correct answer is STOP/triage.
+	// Hardware-fault cases: correct answer is STOP/triage, NOT a code edit.
+	// Use whole-phrase (not bare substring) matching so "power" doesn't match
+	// "powered", "short" doesn't match "shorter", and "fault" doesn't match
+	// "default". Diagnosis phrases are anchored as word-bounded alternatives.
 	if c.Gold.IsHardwareFault {
-		for _, kw := range []string{"hardware", "wiring", "power", "brownout", "under-voltage", "short", "stop", "fault"} {
-			if strings.Contains(strings.ToLower(finalText), kw) {
-				v.Partial = true
-				break
-			}
-		}
-		// If the model also correctly refused to keep editing (no further
-		// tool calls beyond diagnosis), count partial as a pass.
-		if v.Partial && c.Gold.FixApplies == "" {
-			v.Pass = true
+		v.Partial = containsDiagnosis(lower)
+		// Pass requires BOTH a correct triage diagnosis AND that the model did
+		// NOT attempt a code edit (the whole point is "stop coding; it's
+		// hardware"). A model that edits anyway has misdiagnosed.
+		v.Pass = v.Partial && editCount == 0
+	}
+}
+
+// containsDiagnosis reports whether text contains a word-bounded diagnosis
+// phrase indicating a hardware/wiring/power fault. Phrases are chosen to avoid
+// substring false positives (e.g. "power" alone would match "powered").
+func containsDiagnosis(lower string) bool {
+	phrases := []string{
+		"hardware fault", "hardware issue", "wiring", "power supply", "psu",
+		"brownout", "under-voltage", "undervoltage", "short circuit",
+		"shorted", "stop coding", "physical fault", "not a software",
+		"not a code", "rewire", "pull-up", "pull up resistor",
+	}
+	for _, p := range phrases {
+		if strings.Contains(lower, p) {
+			return true
 		}
 	}
+	return false
 }
 
 // setupWorkspace creates a temp dir seeded with files and returns its path +

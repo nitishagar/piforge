@@ -60,7 +60,7 @@ internal/hil/       GPIO, I2C, scope, telemetry, code_edit, inventory tools
 internal/broker/    safety gate (R/B/I classification, arming, under-voltage stop)
 internal/agent/     ReAct loop with prefix-cache discipline
 internal/eval/      case format + runner + scorer + decision rule
-eval/cases/         ~40 case fixtures (the gate)
+eval/cases/         case fixtures covering the recurring bug archetypes (the gate)
 ```
 
 ## Hardware notes

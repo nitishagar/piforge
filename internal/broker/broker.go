@@ -60,13 +60,9 @@ func New(cfg config.SafetyConfig, tel ThrottledReader, confirm Confirmer) *Confi
 
 // Allow implements Gate. It is consulted before any Class I op.
 func (g *ConfirmGate) Allow(physical string, detail map[string]any) error {
-	if g.cfg.ArmMode == "auto" {
-		return nil // eval/batch only; config.Validate gates this
-	}
-	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	// 1. Under-voltage stop signal.
+	// 1. Under-voltage STOP signal — ALWAYS checked first, even in auto-arm
+	// mode. Brownout during a load risks SD-card corruption and crashes; this
+	// must gate every physical op regardless of arming.
 	if g.cfg.StopOnUnderVoltage && g.tel != nil {
 		now, since, err := g.tel.UnderVoltageActive()
 		if err == nil && (now || since) {
@@ -74,24 +70,42 @@ func (g *ConfirmGate) Allow(physical string, detail map[string]any) error {
 		}
 	}
 
-	// 2. Per-(physical,key) scoped arm still valid?
-	key := armKey(physical, detail)
-	if exp, ok := g.armed[key]; ok && time.Now().Before(exp) {
-		return nil // previously armed within the window
+	// 2. Auto-arm short-circuits the human prompt (eval/batch only;
+	// config.Validate gates PIFORGE_ALLOW_AUTO_ARM for the real product).
+	if g.cfg.ArmMode == "auto" {
+		return nil
 	}
 
-	// 3. Risk-tier the op for the prompt.
+	// 3. Check the scoped arm cache under the lock.
+	key := armKey(physical, detail)
+	g.mu.Lock()
+	if exp, ok := g.armed[key]; ok && time.Now().Before(exp) {
+		g.mu.Unlock()
+		return nil // previously armed within the window
+	}
+	// Build the prompt under the lock (reads shared detail), then release
+	// before calling the (possibly blocking) human confirmer.
 	risk := riskTier(physical, detail)
 	prompt := formatPrompt(physical, detail, risk)
+	g.mu.Unlock()
 
-	// 4. Ask the human.
+	// 4. Ask the human WITHOUT holding the lock (a deliberating human would
+	// otherwise block all other Class I ops + their under-voltage rechecks).
 	if !g.confirm(prompt) {
 		return fmt.Errorf("DENIED by user (op=%s risk=%s)", physical, risk)
 	}
 
 	// 5. Grant a scoped, time-limited arm (30s window) — re-approval-free
 	// within the window for the same op+pin, but never a global toggle.
+	g.mu.Lock()
 	g.armed[key] = time.Now().Add(30 * time.Second)
+	// Prune expired arms opportunistically (cheap; keeps the map bounded).
+	for k, exp := range g.armed {
+		if !time.Now().Before(exp) {
+			delete(g.armed, k)
+		}
+	}
+	g.mu.Unlock()
 	return nil
 }
 

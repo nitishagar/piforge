@@ -1,0 +1,19 @@
+{
+  "id": "iio-scale-misapply",
+  "archetype": "iio-scale-misapply",
+  "symptom": "I'm reading /sys/bus/iio/devices/iio:device0/in_voltage0_raw and getting 4095, which is wrong — my ADC is 1.8V and I expect ~2300 for 1.0V",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "dmesg_tail": [],
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "The raw IIO value must be multiplied by in_voltage_scale to get volts. If scale is 0.439453125 (mV), then 4095 * 0.439453125 / 1000 ≈ 1.8V (saturated). The reading of 4095 means the input exceeds the ADC range. The code likely forgets to apply the scale or uses the wrong reference voltage.",
+    "fix_applies": "",
+    "fix_must_contain": [],
+    "fix_must_not_have": [],
+    "is_hardware_fault": false
+  },
+  "hallucinated": []
+}

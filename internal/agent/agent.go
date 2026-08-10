@@ -41,15 +41,24 @@ Rules:
 - Be concise. The hardware is slow (~5 tokens/sec). Do not over-explore.
 `
 
+// LLMClient is the minimal interface the agent loop needs from a model
+// provider. *provider.Client (real llama-server) and eval.MockProvider both
+// satisfy it.
+type LLMClient interface {
+	// Chat performs one completion. Returns content, tool calls, finish reason,
+	// and token telemetry (prompt/completion/cached).
+	Chat(ctx context.Context, req provider.ChatRequest) (*provider.ChatResponse, error)
+}
+
 // Agent drives the tool-use loop.
 type Agent struct {
-	client *provider.Client
-	tools  map[string]hil.Tool
+	client   LLMClient
+	tools    map[string]hil.Tool
 	maxTurns int
 }
 
 // New builds an Agent with the given tools and turn budget.
-func New(client *provider.Client, tools []hil.Tool, maxTurns int) *Agent {
+func New(client LLMClient, tools []hil.Tool, maxTurns int) *Agent {
 	m := map[string]hil.Tool{}
 	for _, t := range tools {
 		m[t.Name()] = t
@@ -75,6 +84,7 @@ func (a *Agent) Run(ctx context.Context, userMsg string, onText func(string)) (*
 		toolDefs = append(toolDefs, t.Schema())
 	}
 
+	var accPrompt, accCompletion, accCached int
 	for turn := 0; turn < a.maxTurns; turn++ {
 		resp, err := a.client.Chat(ctx, provider.ChatRequest{
 			Messages:   msgs,
@@ -84,6 +94,9 @@ func (a *Agent) Run(ctx context.Context, userMsg string, onText func(string)) (*
 		if err != nil {
 			return nil, fmt.Errorf("turn %d: %w", turn, err)
 		}
+		accPrompt += resp.PromptTokens
+		accCompletion += resp.Completion
+		accCached += resp.Cached
 
 		// No tool calls => terminal turn.
 		if len(resp.ToolCalls) == 0 {
@@ -91,11 +104,11 @@ func (a *Agent) Run(ctx context.Context, userMsg string, onText func(string)) (*
 				onText(resp.Content)
 			}
 			return &RunResult{
-				FinalText:     resp.Content,
-				Turns:         turn + 1,
-				PromptTokens:  a.client.Metrics().PromptTokens,
-				Completion:    a.client.Metrics().CompletionTokens,
-				CachedTokens:  a.client.Metrics().CachedTokens,
+				FinalText:    resp.Content,
+				Turns:        turn + 1,
+				PromptTokens: accPrompt,
+				Completion:   accCompletion,
+				CachedTokens: accCached,
 			}, nil
 		}
 
@@ -107,8 +120,8 @@ func (a *Agent) Run(ctx context.Context, userMsg string, onText func(string)) (*
 		// Append the assistant message that CARRIES the tool_calls (the model's
 		// tool-call request). This is required for OpenAI-shape message history.
 		msgs = append(msgs, openai.ChatCompletionMessage{
-			Role:     openai.ChatMessageRoleAssistant,
-			Content:  resp.Content,
+			Role:      openai.ChatMessageRoleAssistant,
+			Content:   resp.Content,
 			ToolCalls: resp.ToolCalls,
 		})
 

@@ -1,0 +1,21 @@
+{
+  "id": "i2c-wrong-address-0x77",
+  "archetype": "wrong-i2c-address",
+  "symptom": "my BME280 throws an error about no device at the configured address. The default Adafruit address is 0x77.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": { "119": "BME280" },
+    "files": {
+      "bme.py": "from board import *\nfrom adafruit_bme280 import basic as adafruit_bme280\ni2c = I2C(scl, sda)\nbme = adafruit_bme280.Adafruit_BME280_I2C(i2c)\nprint(bme.temperature)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "i2cdetect shows the device at 0x77 (119). The Adafruit_BME280_I2C default IS 0x77 — but many cheap breakout boards (GY-BME280) tie SDO high so the address is 0x76. Here it's the opposite: this board is at 0x77 (default) and the constructor should pass 0x77 explicitly, OR scan first to confirm. Wait — the scan shows 0x77 present, so the default should work. The real bug: the SDA/SCL pins are swapped in the I2C() call. Check scl/sda wiring.",
+    "fix_applies": "bme.py",
+    "fix_must_contain": ["address=0x77"],
+    "fix_must_not_have": ["0x76", "0x68"],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["0x76", "0x68", "0x69"]
+}

@@ -42,13 +42,9 @@ func main() {
 	}
 
 	// Build the safety gate (broker). The telemetry tool backs the under-voltage
-	// stop check; the confirmer reads stdin.
+	// stop check (it implements broker.ThrottledReader); the confirmer reads stdin.
 	tel := hil.NewTelemetryTool()
-	gate := broker.New(cfg.Safety, broker.ThrottledFunc(func() (bool, bool, error) {
-		// Defer to the telemetry tool's throttled decode by running the tool.
-		// (Wire: in phase 1 this calls a direct hil helper.)
-		return false, false, nil
-	}), broker.StdinConfirmer(ctx))
+	gate := broker.New(cfg.Safety, tel, broker.StdinConfirmer(ctx))
 
 	gpioChip, err := hil.ResolveChip(cfg.Hardware.GPIOChip)
 	if err != nil {

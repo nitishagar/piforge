@@ -1,0 +1,22 @@
+{
+  "id": "servo-jitter-software-pwm",
+  "archetype": "pwm-backend-jitter",
+  "symptom": "my servo jitters badly on the Pi 5 even though the code worked on an Arduino. I'm using RPi.GPIO software PWM at 50Hz.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "gpio_pins": { "17": "output" },
+    "files": {
+      "servo.py": "import RPi.GPIO as GPIO\nimport time\nGPIO.setmode(GPIO.BCM)\nGPIO.setup(17, GPIO.OUT)\np = GPIO.PWM(17, 50)\np.start(7.5)\nwhile True:\n    time.sleep(1)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "Software PWM under a non-realtime Linux kernel has timing jitter that makes servos stutter, and RPi.GPIO is broken on Pi 5 anyway. Use gpiozero's Servo/AngularServo, which uses lgpio's hardware-timed PWM on Pi 5.",
+    "fix_applies": "servo.py",
+    "fix_must_contain": ["gpiozero", "Servo"],
+    "fix_must_not_have": ["RPi.GPIO", "GPIO.PWM"],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["pigpio"]
+}

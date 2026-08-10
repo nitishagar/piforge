@@ -1,0 +1,19 @@
+{
+  "id": "i2c-not-enabled",
+  "archetype": "i2c-not-enabled",
+  "symptom": "i2cdetect shows no devices at all and my code can't open /dev/i2c-1",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "dmesg_tail": ["i2c-bcm2835: could not find an available device"],
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "I2C is not enabled. Add dtparam=i2c_arm=on to /boot/firmware/config.txt and reboot, then run modprobe i2c-dev.",
+    "fix_applies": "config.txt",
+    "fix_must_contain": ["dtparam=i2c_arm=on"],
+    "fix_must_not_have": ["dtparam=i2c_arm=off"],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["0x76", "0x68", "BME280"]
+}

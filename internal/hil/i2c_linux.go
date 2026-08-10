@@ -43,10 +43,10 @@ func (t *I2CTool) Schema() openai.Tool {
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
-					"action":  map[string]any{"type": "string", "enum": []string{"scan", "read", "detect"}},
-					"address": map[string]any{"type": "integer", "description": "7-bit I2C address, e.g. 118 for 0x76"},
+					"action":   map[string]any{"type": "string", "enum": []string{"scan", "read", "detect"}},
+					"address":  map[string]any{"type": "integer", "description": "7-bit I2C address, e.g. 118 for 0x76"},
 					"register": map[string]any{"type": "integer", "description": "register byte to read (read only)"},
-					"length":  map[string]any{"type": "integer", "description": "bytes to read (read only, default 1)"},
+					"length":   map[string]any{"type": "integer", "description": "bytes to read (read only, default 1)"},
 				},
 				"required": []string{"action"},
 			},
@@ -55,10 +55,10 @@ func (t *I2CTool) Schema() openai.Tool {
 }
 
 type i2cArgs struct {
-	Action  string `json:"action"`
-	Address int    `json:"address"`
-	Register *int  `json:"register"`
-	Length  int    `json:"length"`
+	Action   string `json:"action"`
+	Address  int    `json:"address"`
+	Register *int   `json:"register"`
+	Length   int    `json:"length"`
 }
 
 // Execute implements Tool.

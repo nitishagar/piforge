@@ -4,14 +4,15 @@
 // The get_throttled decoder is load-bearing: a non-zero value is a STOP signal
 // before adding load. Bitmask verified from the official Raspberry Pi docs
 // (documentation/asciidoc/computers/os/graphics-utilities.adoc):
-//   bit 0  (0x1)     undervoltage detected NOW
-//   bit 1  (0x2)     arm frequency capped NOW
-//   bit 2  (0x4)     currently throttled NOW
-//   bit 3  (0x8)     soft temperature limit active NOW
-//   bit 16 (0x10000) undervoltage has occurred since boot
-//   bit 17 (0x20000) arm frequency capping has occurred
-//   bit 18 (0x40000) throttling has occurred
-//   bit 19 (0x80000) soft temperature limit has occurred
+//
+//	bit 0  (0x1)     undervoltage detected NOW
+//	bit 1  (0x2)     arm frequency capped NOW
+//	bit 2  (0x4)     currently throttled NOW
+//	bit 3  (0x8)     soft temperature limit active NOW
+//	bit 16 (0x10000) undervoltage has occurred since boot
+//	bit 17 (0x20000) arm frequency capping has occurred
+//	bit 18 (0x40000) throttling has occurred
+//	bit 19 (0x80000) soft temperature limit has occurred
 package hil
 
 import (
@@ -40,7 +41,7 @@ func (TelemetryTool) Schema() openai.Tool {
 	return openai.Tool{
 		Type: openai.ToolTypeFunction,
 		Function: &openai.FunctionDefinition{
-			Name: "telemetry",
+			Name:        "telemetry",
 			Description: "Read Raspberry Pi health telemetry. action=snapshot returns CPU temp, core volts, throttled state (undervoltage/throttle bits), dmesg tail, and free memory — the instrument panel before any physical action. action=throttled returns just the decoded throttled bitmask.",
 			Parameters: map[string]any{
 				"type": "object",
@@ -91,14 +92,14 @@ func (TelemetryTool) Execute(ctx context.Context, raw json.RawMessage) (any, err
 
 // ThrottledBits is the decoded get_throttled bitmask.
 type ThrottledBits struct {
-	UnderVoltageNow         bool `json:"under_voltage_now"`
-	ArmFreqCappedNow        bool `json:"arm_freq_capped_now"`
-	CurrentlyThrottledNow   bool `json:"currently_throttled_now"`
-	SoftTempLimitNow        bool `json:"soft_temp_limit_now"`
-	UnderVoltageSinceBoot   bool `json:"under_voltage_since_boot"`
-	ArmFreqCappedSinceBoot  bool `json:"arm_freq_capped_since_boot"`
-	ThrottledSinceBoot      bool `json:"throttled_since_boot"`
-	SoftTempLimitSinceBoot  bool `json:"soft_temp_limit_since_boot"`
+	UnderVoltageNow        bool `json:"under_voltage_now"`
+	ArmFreqCappedNow       bool `json:"arm_freq_capped_now"`
+	CurrentlyThrottledNow  bool `json:"currently_throttled_now"`
+	SoftTempLimitNow       bool `json:"soft_temp_limit_now"`
+	UnderVoltageSinceBoot  bool `json:"under_voltage_since_boot"`
+	ArmFreqCappedSinceBoot bool `json:"arm_freq_capped_since_boot"`
+	ThrottledSinceBoot     bool `json:"throttled_since_boot"`
+	SoftTempLimitSinceBoot bool `json:"soft_temp_limit_since_boot"`
 }
 
 // snapshot captures the full instrument panel.
@@ -160,6 +161,17 @@ func throttled() (string, ThrottledBits, error) {
 		SoftTempLimitSinceBoot: val&(1<<19) != 0,
 	}
 	return s, bits, nil
+}
+
+// UnderVoltageActive reports whether the under-voltage stop condition is set.
+// Used by the broker gate to refuse Class I ops before adding load. Returns
+// (now, sinceBoot, err): either bit stops the agent from driving hardware.
+func (TelemetryTool) UnderVoltageActive() (now, sinceBoot bool, err error) {
+	_, bits, err := throttled()
+	if err != nil {
+		return false, false, err
+	}
+	return bits.UnderVoltageNow, bits.UnderVoltageSinceBoot, nil
 }
 
 // vcgencmd runs `vcgencmd <args...>` and returns trimmed stdout.

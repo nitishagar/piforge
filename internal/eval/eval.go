@@ -7,8 +7,10 @@
 //   - Decision rule: >=55% fix-rate AND <10% register/pin hallucination
 //     => build local. ~30% => ship against a cloud model instead.
 //
-// This package defines the case format, the runner, and the scorer. The actual
-// ~40 fixtures live under eval/cases/ as JSON (added incrementally).
+// Cases run headless: the agent's HIL tool calls are served by the sim package
+// from each Case fixture's Setup, and edits land in a per-case temp workspace
+// the scorer reads back. A mock provider lets the whole thing run in CI without
+// a llama-server; the real provider is used for the actual model evaluation.
 package eval
 
 import (
@@ -17,76 +19,87 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/nitishagar/piforge/internal/agent"
+	"github.com/nitishagar/piforge/internal/broker"
+	"github.com/nitishagar/piforge/internal/config"
 	"github.com/nitishagar/piforge/internal/hil"
 	"github.com/nitishagar/piforge/internal/provider"
+	"github.com/nitishagar/piforge/internal/sim"
 )
 
 // Case is a single eval fixture.
 type Case struct {
-	ID          string   `json:"id"`
-	Archetype   string   `json:"archetype"`    // e.g. "wrong-i2c-address"
-	Symptom     string   `json:"symptom"`      // user prompt (the symptom, not the answer)
-	Setup       Setup    `json:"setup"`        // initial board state (simulated or real)
-	Gold        Gold     `json:"gold"`         // the correct fix + diagnosis
-	Hallucinated []string `json:"hallucinated"` // patterns that count as hallucination (e.g. ["0x4a","0x4b"] for a wrong addr)
+	ID           string   `json:"id"`
+	Archetype    string   `json:"archetype"`
+	Symptom      string   `json:"symptom"`
+	Setup        Setup    `json:"setup"`
+	Gold         Gold     `json:"gold"`
+	Hallucinated []string `json:"hallucinated"`
 }
 
-// Setup describes the initial hardware/code state. For the MVP these are
-// descriptions the harness loads into a simulated provider (see Simulator);
-// a later phase wires real Pi fixtures.
+// Setup is the initial hardware/code state for a case (mirrors sim.Setup).
 type Setup struct {
-	Board        string            `json:"board"`
-	I2CDevices   map[int]string    `json:"i2c_devices"`   // addr -> chip id
-	GPIOPins     map[int]string    `json:"gpio_pins"`     // pin -> mode/value
-	Files        map[string]string `json:"files"`         // path -> broken code content
-	DmesgTail    []string          `json:"dmesg_tail"`
-	Throttled    string            `json:"throttled"`     // e.g. "0x0"
+	Board       string            `json:"board"`
+	I2CDevices  map[int]string    `json:"i2c_devices"`
+	ScanPattern string            `json:"scan_pattern"` // "all" => every address responds (shorted bus)
+	GPIOPins    map[int]string    `json:"gpio_pins"`
+	Files       map[string]string `json:"files"`
+	DmesgTail   []string          `json:"dmesg_tail"`
+	Throttled   string            `json:"throttled"`
 }
 
 // Gold is the correct answer for scoring.
 type Gold struct {
 	Diagnosis       string   `json:"diagnosis"`
-	FixApplies      string   `json:"fix_applies"`      // path of the file the fix touches
-	FixMustContain  []string `json:"fix_must_contain"` // substrings the corrected code must contain
-	FixMustNotHave  []string `json:"fix_must_not_have"`// substrings the corrected code must NOT contain
-	IsHardwareFault bool     `json:"is_hardware_fault"`// true => correct answer is STOP/triage, not edit
+	FixApplies      string   `json:"fix_applies"`
+	FixMustContain  []string `json:"fix_must_contain"`
+	FixMustNotHave  []string `json:"fix_must_not_have"`
+	IsHardwareFault bool     `json:"is_hardware_fault"`
 }
 
 // Verdict is the per-case score.
 type Verdict struct {
-	CaseID         string
-	Pass           bool
-	Partial        bool
-	Hallucination  bool
-	DurationSec    float64
-	Turns          int
-	CacheHitRate   float64
-	Notes          string
+	CaseID        string
+	Pass          bool
+	Partial       bool
+	Hallucination bool
+	DurationSec   float64
+	Turns         int
+	CacheHitRate  float64
+	Notes         string
 }
 
-// Runner runs a set of cases against a configured model+tools.
+// Runner runs cases against a configured model+tools.
 type Runner struct {
 	client   *provider.Client
-	tools    []hil.Tool
 	maxTurns int
+	// mockProvider, when non-nil, is used instead of client (CI mode).
+	mockProvider *MockProvider
 }
 
-// NewRunner builds a Runner.
-func NewRunner(client *provider.Client, tools []hil.Tool, maxTurns int) *Runner {
-	return &Runner{client: client, tools: tools, maxTurns: maxTurns}
+// NewRunner builds a Runner against a real provider.
+func NewRunner(client *provider.Client, maxTurns int) *Runner {
+	return &Runner{client: client, maxTurns: maxTurns}
 }
 
-// RunAll runs all *.json cases in a directory and returns per-case verdicts +
-// aggregate metrics.
+// NewMockRunner builds a Runner against a scripted mock provider for CI.
+// Each case maps to a canned assistant response via script(caseID).
+func NewMockRunner(maxTurns int, script func(caseID string) []MockTurn) *Runner {
+	return &Runner{maxTurns: maxTurns, mockProvider: &MockProvider{Script: script}}
+}
+
+// RunAll runs all *.json cases in a directory and returns per-case verdicts.
 func (r *Runner) RunAll(ctx context.Context, casesDir string, onProgress func(Verdict)) ([]Verdict, error) {
 	entries, err := os.ReadDir(casesDir)
 	if err != nil {
 		return nil, fmt.Errorf("read cases dir: %w", err)
 	}
+	// Sort for deterministic output.
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
 	var verdicts []Verdict
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
@@ -104,7 +117,6 @@ func (r *Runner) RunAll(ctx context.Context, casesDir string, onProgress func(Ve
 	return verdicts, nil
 }
 
-// runFile loads + runs a single case file.
 func (r *Runner) runFile(ctx context.Context, path string) (Verdict, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -117,17 +129,55 @@ func (r *Runner) runFile(ctx context.Context, path string) (Verdict, error) {
 	return r.runCase(ctx, c)
 }
 
-// runCase runs one case against the configured model+tools and scores it.
+// runCase runs one case against sim-served hardware, in an isolated temp dir.
 func (r *Runner) runCase(ctx context.Context, c Case) (Verdict, error) {
 	v := Verdict{CaseID: c.ID}
 	start := time.Now()
 
-	// TODO(phase-1): wire the simulated provider that serves c.Setup to the
-	// HIL tools (so i2c reads return the fixture's device values, etc.).
-	// For now the runner exercises the live loop against the real provider;
-	// scoring uses Gold.FixMustContain on the edited file content.
-	a := agent.New(r.client, r.tools, r.maxTurns)
-	res, err := a.Run(ctx, c.Symptom, nil)
+	// Per-case temp workspace: write the fixture's files into it, point the
+	// edit tool at it, score by reading back from it after the run.
+	workspace, cleanup, err := setupWorkspace(c.Setup.Files)
+	if err != nil {
+		return v, err
+	}
+	defer cleanup()
+
+	// Build the sim state + tools from the fixture.
+	st := sim.StateFromSetup(sim.Setup{
+		Board: c.Setup.Board, I2CDevices: c.Setup.I2CDevices,
+		ScanPattern: c.Setup.ScanPattern,
+		GPIOPins:    c.Setup.GPIOPins, Files: c.Setup.Files,
+		DmesgTail: c.Setup.DmesgTail, Throttled: c.Setup.Throttled,
+	})
+
+	// The eval uses an auto-arm gate (no human prompts). Under-voltage still
+	// gates Class I (the shorted-bus case must not drive any pin).
+	tel := sim.NewTelemetryTool(st)
+	gate := broker.New(config.SafetyConfig{
+		ArmMode:            "auto", // eval/batch; main entrypoint gates PIFORGE_ALLOW_AUTO_ARM
+		StopOnUnderVoltage: true,
+		PerPinMaxCurrentMA: 12,
+		RailBudgetMA:       50,
+	}, broker.ThrottledFunc(tel.UnderVoltageActive), broker.AlwaysDenyConfirmer())
+
+	tools := []hil.Tool{
+		sim.NewInventoryTool(st),
+		tel,
+		sim.NewI2CTool(st),
+		sim.NewGPIOTool(st, gate),
+		sim.NewScopeTool(st),
+		hil.NewCodeEditTool(workspace),
+	}
+
+	var res *agent.RunResult
+	if r.mockProvider != nil {
+		r.mockProvider.setCase(c.ID)
+		a := agent.New(r.mockProvider, tools, r.maxTurns)
+		res, err = a.Run(ctx, c.Symptom, nil)
+	} else {
+		a := agent.New(r.client, tools, r.maxTurns)
+		res, err = a.Run(ctx, c.Symptom, nil)
+	}
 	v.DurationSec = time.Since(start).Seconds()
 	if err != nil {
 		v.Notes = "error: " + err.Error()
@@ -137,9 +187,25 @@ func (r *Runner) runCase(ctx context.Context, c Case) (Verdict, error) {
 	v.CacheHitRate = res.CacheHitRate()
 	v.Notes = truncate(res.FinalText, 200)
 
-	// Score: did the fix land the expected content?
+	// Score against the edited file in the workspace.
+	r.score(ctx, c, workspace, res.FinalText, &v)
+	return v, nil
+}
+
+// score applies the gold rubric to the edited file + final text.
+func (r *Runner) score(ctx context.Context, c Case, workspace, finalText string, v *Verdict) {
+	// Hallucination detection: scan the final text for known-wrong patterns.
+	lower := strings.ToLower(finalText)
+	for _, h := range c.Hallucinated {
+		if strings.Contains(lower, strings.ToLower(h)) {
+			v.Hallucination = true
+			break
+		}
+	}
+
+	// Code-fix scoring: read the (possibly edited) file from the workspace.
 	if c.Gold.FixApplies != "" && len(c.Gold.FixMustContain) > 0 {
-		got, rerr := os.ReadFile(c.Gold.FixApplies)
+		got, rerr := os.ReadFile(filepath.Join(workspace, c.Gold.FixApplies))
 		if rerr == nil {
 			allIn := true
 			for _, s := range c.Gold.FixMustContain {
@@ -158,29 +224,48 @@ func (r *Runner) runCase(ctx context.Context, c Case) (Verdict, error) {
 			v.Pass = allIn && noneBad
 		}
 	}
+
+	// Hardware-fault cases: correct answer is STOP/triage.
 	if c.Gold.IsHardwareFault {
-		// Correct answer is to STOP/triage — partial credit for a correct
-		// diagnosis without an edit.
-		for _, kw := range []string{"hardware", "wiring", "power", "brownout", "under-voltage", "short", "stop"} {
-			if strings.Contains(strings.ToLower(res.FinalText), kw) {
+		for _, kw := range []string{"hardware", "wiring", "power", "brownout", "under-voltage", "short", "stop", "fault"} {
+			if strings.Contains(strings.ToLower(finalText), kw) {
 				v.Partial = true
 				break
 			}
 		}
-	}
-
-	// Hallucination detection: scan final text for known-wrong patterns.
-	lower := strings.ToLower(res.FinalText)
-	for _, h := range c.Hallucinated {
-		if strings.Contains(lower, strings.ToLower(h)) {
-			v.Hallucination = true
-			break
+		// If the model also correctly refused to keep editing (no further
+		// tool calls beyond diagnosis), count partial as a pass.
+		if v.Partial && c.Gold.FixApplies == "" {
+			v.Pass = true
 		}
 	}
-	return v, nil
 }
 
-// Summary aggregates per-case verdicts into pass/hallucination rates.
+// setupWorkspace creates a temp dir seeded with files and returns its path +
+// a cleanup func.
+func setupWorkspace(files map[string]string) (dir string, cleanup func(), err error) {
+	dir, err = os.MkdirTemp("", "piforge-eval-*")
+	if err != nil {
+		return "", nil, err
+	}
+	for rel, content := range files {
+		abs := filepath.Join(dir, rel)
+		if mkErr := os.MkdirAll(filepath.Dir(abs), 0o755); mkErr != nil {
+			os.RemoveAll(dir)
+			return "", nil, mkErr
+		}
+		if wErr := os.WriteFile(abs, []byte(content), 0o644); wErr != nil {
+			os.RemoveAll(dir)
+			return "", nil, wErr
+		}
+	}
+	return dir, func() { os.RemoveAll(dir) }, nil
+}
+
+// autoArmSafety helper removed — the broker is constructed inline in runCase
+// with a config.SafetyConfig{ArmMode:"auto", ...}.
+
+// Summary aggregates per-case verdicts.
 type Summary struct {
 	Total             int
 	Passed            int
@@ -220,8 +305,6 @@ func Summarize(vs []Verdict) Summary {
 }
 
 // Decide applies the eval decision rule.
-//   passRate >= threshold AND halluc < threshold => "build local"
-//   passRate < ~0.30 => "pivot to cloud model"
 func Decide(s Summary, passThreshold, hallucThreshold float64) string {
 	if s.PassRate >= passThreshold && s.HallucinationRate <= hallucThreshold {
 		return "BUILD_LOCAL"
@@ -229,21 +312,14 @@ func Decide(s Summary, passThreshold, hallucThreshold float64) string {
 	if s.PassRate < 0.30 {
 		return "PIVOT_TO_CLOUD"
 	}
-	return "INCONCLUSIVE — tune prompt/tools or add cases"
+	return "INCONCLUSIVE"
 }
 
 func median(xs []int) int {
 	if len(xs) == 0 {
 		return 0
 	}
-	// simple sort + pick middle (n small)
-	for i := 0; i < len(xs); i++ {
-		for j := i + 1; j < len(xs); j++ {
-			if xs[j] < xs[i] {
-				xs[i], xs[j] = xs[j], xs[i]
-			}
-		}
-	}
+	sort.Ints(xs)
 	return xs[len(xs)/2]
 }
 

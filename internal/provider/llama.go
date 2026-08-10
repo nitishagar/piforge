@@ -19,8 +19,8 @@ import (
 // llama-server. It records usage telemetry useful for the eval harness and
 // for verifying prefix-cache reuse.
 type Client struct {
-	cli      *openai.Client
-	cfg      config.ServerConfig
+	cli *openai.Client
+	cfg config.ServerConfig
 	// Telemetry accumulated across calls in a session.
 	metrics Metrics
 }

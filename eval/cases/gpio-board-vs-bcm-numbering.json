@@ -1,0 +1,22 @@
+{
+  "id": "gpio-board-vs-bcm-numbering",
+  "archetype": "gpio-numbering",
+  "symptom": "my LED on physical pin 11 won't light, but the code sets pin 11. I'm using gpiozero.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "gpio_pins": { "17": "output", "11": "input" },
+    "files": {
+      "blink.py": "from gpiozero import LED\nfrom time import sleep\nled = LED(11)\nwhile True:\n    led.on()\n    sleep(0.5)\n    led.off()\n    sleep(0.5)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "gpiozero uses Broadcom (BCM) numbering by default, not physical BOARD pin numbers. Physical pin 11 is BCM GPIO17. The code passes 11 (a valid BCM pin, but the wrong one) instead of 17.",
+    "fix_applies": "blink.py",
+    "fix_must_contain": ["LED(17)"],
+    "fix_must_not_have": ["LED(11)"],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["BOARD", "GPIO27", "GPIO4"]
+}

@@ -1,0 +1,22 @@
+{
+  "id": "pi5-rpigpio-migration-break",
+  "archetype": "pi5-lgpio-migration",
+  "symptom": "my old script crashes instantly on the new Pi 5 with 'Cannot determine SOC peripheral base address'. It worked fine on the Pi 4.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "gpio_pins": { "17": "output" },
+    "files": {
+      "app.py": "import RPi.GPIO as GPIO\nGPIO.setmode(GPIO.BCM)\nGPIO.setup(17, GPIO.OUT)\nGPIO.output(17, GPIO.HIGH)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "RPi.GPIO is broken on the Pi 5 (it pokes BCM2835 mmio registers directly; the Pi 5's GPIO is on the RP1 southbridge exposed via /dev/gpiochipN). Only lgpio works on the Pi 5. Rewrite using gpiozero (which auto-selects lgpio) or libgpiod.",
+    "fix_applies": "app.py",
+    "fix_must_contain": ["gpiozero"],
+    "fix_must_not_have": ["RPi.GPIO", "import RPi"],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["pigpio", "BCM2835"]
+}

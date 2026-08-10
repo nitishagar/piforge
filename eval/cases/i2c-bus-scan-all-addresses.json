@@ -4,7 +4,7 @@
   "symptom": "my I2C sensor isn't working and i2cdetect seems to show everything",
   "setup": {
     "board": "Raspberry Pi 5 Model B Rev 1.0",
-    "i2c_devices": { "_scan_pattern": "ALL_ADDRESSES_RESPOND" },
+    "scan_pattern": "all",
     "files": {},
     "throttled": "0x0"
   },

@@ -14,12 +14,12 @@ import (
 
 // Config is the top-level configuration object.
 type Config struct {
-	Model      ModelConfig      `toml:"model"`
-	Server     ServerConfig     `toml:"server"`
-	Agent      AgentConfig      `toml:"agent"`
-	Hardware   HardwareConfig   `toml:"hardware"`
-	Safety     SafetyConfig     `toml:"safety"`
-	Eval       EvalConfig       `toml:"eval"`
+	Model    ModelConfig    `toml:"model"`
+	Server   ServerConfig   `toml:"server"`
+	Agent    AgentConfig    `toml:"agent"`
+	Hardware HardwareConfig `toml:"hardware"`
+	Safety   SafetyConfig   `toml:"safety"`
+	Eval     EvalConfig     `toml:"eval"`
 }
 
 // ModelConfig selects the model and quantization.
@@ -135,15 +135,15 @@ func Default() *Config {
 			TelemetryPreload: true,
 		},
 		Hardware: HardwareConfig{
-			Board:   "",
+			Board:    "",
 			GPIOChip: "",
-			I2CBus:  "/dev/i2c-1",
+			I2CBus:   "/dev/i2c-1",
 		},
 		Safety: SafetyConfig{
-			ArmMode:             "confirm",
-			PerPinMaxCurrentMA:  12, // RP1 register max; do not raise
-			RailBudgetMA:        50, // conservative guideline, not an RP1 spec
-			StopOnUnderVoltage:  true,
+			ArmMode:            "confirm",
+			PerPinMaxCurrentMA: 12, // RP1 register max; do not raise
+			RailBudgetMA:       50, // conservative guideline, not an RP1 spec
+			StopOnUnderVoltage: true,
 		},
 		Eval: EvalConfig{
 			CasesDir:               "eval/cases",

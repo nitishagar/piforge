@@ -157,7 +157,7 @@ type scopeArgs struct {
 
 // EdgeEvent is a single edge in a scope capture.
 type EdgeEvent struct {
-	T   int64  `json:"t_us"` // monotonic microseconds since capture start
+	T    int64  `json:"t_us"` // monotonic microseconds since capture start
 	Edge string `json:"edge"` // "rising" | "falling"
 }
 

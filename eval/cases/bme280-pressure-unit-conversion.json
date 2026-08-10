@@ -1,0 +1,21 @@
+{
+  "id": "bme280-pressure-unit-conversion",
+  "archetype": "unit-conversion",
+  "symptom": "my BME280 reads temperature fine but pressure shows ~1013 when it should be ~101300 Pa. The raw register read is correct.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": { "118": "BME280" },
+    "files": {
+      "bme_read.py": "def read_pressure(reg_bytes):\n    raw = int.from_bytes(reg_bytes, 'big')\n    return raw\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "BME280 pressure registers return value in Pa but the Bosch driver compensation can emit hPa (Pa/100) depending on config. The code returns raw without the /100 or the compensation. Check the unit: 1013 hPa == 101300 Pa.",
+    "fix_applies": "bme_read.py",
+    "fix_must_contain": ["* 100", "hPa"],
+    "fix_must_not_have": [],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["0x77", "* 1000", "* 10"]
+}

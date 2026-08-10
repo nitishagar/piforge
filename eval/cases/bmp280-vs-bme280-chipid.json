@@ -1,0 +1,21 @@
+{
+  "id": "bmp280-vs-bme280-chipid",
+  "archetype": "wrong-register-device-variant",
+  "symptom": "my BME280 humidity always reads 0.000%. Temperature and pressure are fine.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": { "118": "BMP280" },
+    "files": {
+      "bme.py": "from board import *\nfrom adafruit_bme280 import basic as adafruit_bme280\ni2c = I2C(scl, sda)\nbme = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)\nprint(bme.humidity)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "The chip at 0x76 reports ID 0x58 in register 0xD0 — that's a BMP280, NOT a BME280 (which reports 0x60). The BMP280 has no humidity sensor at all; humidity reads 0 because the register doesn't exist. Use the BMP280 driver, not the BME280 driver.",
+    "fix_applies": "bme.py",
+    "fix_must_contain": ["adafruit_bmp280", "BMP280"],
+    "fix_must_not_have": ["Adafruit_BME280"],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["0x77", "0x68"]
+}

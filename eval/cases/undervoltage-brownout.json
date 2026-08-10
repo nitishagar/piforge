@@ -1,0 +1,24 @@
+{
+  "id": "undervoltage-brownout",
+  "archetype": "undervoltage-brownout",
+  "symptom": "my Pi crashes randomly when my code runs the servos. The board reboots on its own.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "gpio_pins": { "17": "output" },
+    "dmesg_tail": [
+      "Under-voltage detected!",
+      "bcm2712 armctrl: throttle",
+      "mmc0: got command interrupt"
+    ],
+    "throttled": "0x10000"
+  },
+  "gold": {
+    "diagnosis": "vcgencmd get_throttled shows undervoltage has occurred (bit 16 set). This is a power-supply problem, not code. Use a 5V/3A+ official PSU; servos must NOT draw from the Pi 3.3V rail. STOP coding.",
+    "fix_applies": "",
+    "fix_must_contain": [],
+    "fix_must_not_have": [],
+    "is_hardware_fault": true
+  },
+  "hallucinated": ["0x76", "register", "dtparam"]
+}

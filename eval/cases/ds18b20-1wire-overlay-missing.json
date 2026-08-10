@@ -1,0 +1,19 @@
+{
+  "id": "ds18b20-1wire-overlay-missing",
+  "archetype": "1wire-overlay-missing",
+  "symptom": "my DS18B20 temperature sensor doesn't show up in /sys/bus/w1/devices. I wired it to GPIO4.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "dmesg_tail": [],
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "The 1-wire overlay is not loaded. Add dtoverlay=w1-gpio (and the w1-therm module loads automatically) to /boot/firmware/config.txt and reboot.",
+    "fix_applies": "config.txt",
+    "fix_must_contain": ["dtoverlay=w1-gpio"],
+    "fix_must_not_have": [],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["dtparam=i2c_arm=on", "0x76"]
+}

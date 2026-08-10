@@ -1,0 +1,30 @@
+# Build artifacts
+/piforge
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# claude-files symlinks (attached tooling, not part of this repo)
+/.claude/
+/.zcode/
+
+# Local design/spec/plans (kept out of the repo per project convention)
+DESIGN.md
+PLAN.md
+SPEC.md
+/notes/
+/scratch/
+
+# Go
+vendor/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp

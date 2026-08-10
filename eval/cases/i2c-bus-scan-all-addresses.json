@@ -1,0 +1,19 @@
+{
+  "id": "i2c-bus-scan-all-addresses",
+  "archetype": "i2c-scan-all-addresses",
+  "symptom": "my I2C sensor isn't working and i2cdetect seems to show everything",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": { "_scan_pattern": "ALL_ADDRESSES_RESPOND" },
+    "files": {},
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "i2cdetect showing every address means SDA/SCL are shorted to power (often the 3.3V or 5V rail) or to each other. This is a wiring fault; STOP coding. The agent must not keep probing or rewriting the driver.",
+    "fix_applies": "",
+    "fix_must_contain": [],
+    "fix_must_not_have": [],
+    "is_hardware_fault": true
+  },
+  "hallucinated": ["0x76", "0x68", "register"]
+}

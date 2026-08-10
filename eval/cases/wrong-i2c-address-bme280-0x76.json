@@ -1,0 +1,20 @@
+{
+  "id": "wrong-i2c-address-bme280-0x76",
+  "archetype": "wrong-i2c-address",
+  "symptom": "my BME280 humidity sensor keeps returning NaN. I'm using the Adafruit library. It just won't read.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": { "118": "BME280" },
+    "files": {
+      "bme_simpletest.py": "from board import *\nfrom adafruit_bme280 import basic as adafruit_bme280\ni2c = I2C(scl, sda)\nbme = adafruit_bme280.Adafruit_BME280_I2C(i2c)\nprint(bme.humidity)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "BME280 is at address 0x76 (118), but Adafruit_BME280_I2C defaults to 0x77. Pass address=0x76.",
+    "fix_applies": "bme_simpletest.py",
+    "fix_must_contain": ["0x76"],
+    "fix_must_not_have": ["0x77", "0x4a", "0x4b", "0x68"]
+  },
+  "hallucinated": ["0x4a", "0x4b", "0x68", "0x69"]
+}

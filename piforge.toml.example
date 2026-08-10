@@ -1,0 +1,43 @@
+# piforge.toml.example — copy to piforge.toml and edit.
+# All fields have defaults; this documents the common knobs.
+
+[model]
+# Path to the GGUF file. Only needed if piforge launches its own server (not yet
+# implemented); for now start llama-server yourself and set server.base_url.
+path = ""
+quant = "Q4_K_M"
+# Context window. On Pi 5 8GB with Q4 weights + Q8 KV, 8192 is realistic.
+context = 8192
+# "off" uses Qwen3-4B-Instruct-2507 (interactive, ~5 tok/s on Pi 5).
+# "on" requires Qwen3-4B-Thinking-2507 — but it's a BATCH tool (~1.5 tok/s),
+# not usable in an interactive loop. Leave off.
+thinking_mode = "off"
+
+[server]
+base_url = "http://127.0.0.1:8080/v1"
+api_key = "dummy"
+max_tokens = 1024
+temperature = 0.2
+
+[agent]
+max_turns = 12
+# Pre-populate the first turn with a telemetry snapshot to cut round-trips.
+telemetry_preload = true
+
+[hardware]
+# Pi 5 40-pin header. Leave empty to auto-discover (resolves to gpiochip4).
+gpiochip = ""
+i2c_bus = "/dev/i2c-1"
+
+[safety]
+# "confirm" = per-Class-I human confirm (default, safe).
+# "auto" = auto-approve all (DANGEROUS; eval/batch only; requires PIFORGE_ALLOW_AUTO_ARM=1).
+arm_mode = "confirm"
+per_pin_max_current_ma = 12  # RP1 max; do not raise
+rail_budget_ma = 50          # conservative guideline, not an RP1 spec
+stop_on_under_voltage = true
+
+[eval]
+cases_dir = "eval/cases"
+pass_rate_threshold = 0.55
+hallucination_threshold = 0.10

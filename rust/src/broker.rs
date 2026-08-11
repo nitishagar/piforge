@@ -9,8 +9,10 @@
 //!   - The confirm callback is invoked outside the lock so a deliberating
 //!     human doesn't block other Class I ops or their under-voltage rechecks.
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+use parking_lot::Mutex;
 
 use serde_json::Value;
 
@@ -68,7 +70,7 @@ impl Gate for Broker {
         // 3. Scoped arm cache.
         let key = arm_key(physical, &detail);
         {
-            let mut armed = self.armed.lock().unwrap();
+            let mut armed = self.armed.lock();
             if let Some(exp) = armed.get(&key) {
                 if Instant::now() < *exp {
                     return Ok(()); // armed within the window
@@ -86,7 +88,7 @@ impl Gate for Broker {
 
         // 5. Grant a scoped, 30s arm; prune expired entries.
         {
-            let mut armed = self.armed.lock().unwrap();
+            let mut armed = self.armed.lock();
             armed.insert(key, Instant::now() + Duration::from_secs(30));
             armed.retain(|_, exp| Instant::now() < *exp);
         }

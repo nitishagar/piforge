@@ -2,7 +2,7 @@
 //! [`hil::Tool`] interface as the real hardware tools, so the agent loop is
 //! identical between live and eval runs.
 use std::collections::HashMap;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -97,7 +97,7 @@ use std::sync::Arc;
 // ---- telemetry adapter for the broker gate ----
 impl ThrottledReader for State {
     fn under_voltage_active(&self) -> (bool, bool) {
-        let s = self.inner.lock().unwrap();
+        let s = self.inner.lock();
         (s.throttled & (1 << 0) != 0, s.throttled & (1 << 16) != 0)
     }
 }
@@ -112,7 +112,7 @@ impl Tool for InventoryTool {
     fn description(&self) -> &str { "List detected hardware: I2C devices, GPIO pins, board model. Call first." }
     fn parameters(&self) -> Value { json!({"type":"object","properties":{}}) }
     async fn execute(&self, _args: &Value) -> ToolResult {
-        let s = self.st.inner.lock().unwrap();
+        let s = self.st.inner.lock();
         let mut inv = json!({"board": s.board});
         if let Some(bus) = &s.i2c {
             let addrs: Vec<String> = bus.devices.keys().map(|a| format!("0x{a:02x}")).collect();
@@ -139,7 +139,7 @@ impl Tool for TelemetryTool {
     }
     async fn execute(&self, args: &Value) -> ToolResult {
         let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("snapshot");
-        let s = self.st.inner.lock().unwrap();
+        let s = self.st.inner.lock();
         match action {
             "temp" => ToolResult::ok_unit("telemetry", json!({"cpu_temp":"temp=48.5'C"}), "degC"),
             "throttled" => {
@@ -180,7 +180,7 @@ impl Tool for I2CTool {
     async fn execute(&self, args: &Value) -> ToolResult {
         let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("scan");
         let addr = args.get("address").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-        let s = self.st.inner.lock().unwrap();
+        let s = self.st.inner.lock();
         match action {
             "scan" => {
                 match &s.i2c {
@@ -210,7 +210,8 @@ impl Tool for I2CTool {
                         let reg = args.get("register").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
                         let n = args.get("length").and_then(|v| v.as_i64()).unwrap_or(1) as usize;
                         let zeros: Vec<u8> = vec![0; n];
-                        let mut out = json!({"address":format!("0x{addr:02x}"),"register":format!("0x{reg:02x}"),"raw_hex":format!("{:x?}",zeros),"raw_dec":zeros});
+                        let raw_hex: String = zeros.iter().map(|b| format!("{b:02x}")).collect();
+                        let mut out = json!({"address":format!("0x{addr:02x}"),"register":format!("0x{reg:02x}"),"raw_hex":raw_hex,"raw_dec":zeros});
                         if !dev.chip.is_empty() { out["chip"] = json!(dev.chip); }
                         return ToolResult::ok_unit("i2c", out, "bytes (see datasheet for scaling)");
                     }
@@ -238,7 +239,7 @@ impl Tool for GPIOTool {
     async fn execute(&self, args: &Value) -> ToolResult {
         let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("get");
         let pin = args.get("pin").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-        let mut s = self.st.inner.lock().unwrap();
+        let mut s = self.st.inner.lock();
         match action {
             "get" => match s.gpio.get(&pin) {
                 Some(p) => ToolResult::ok_unit("gpio", json!({"pin":pin,"value":p.value}), "level(0|1)"),
@@ -274,7 +275,7 @@ impl Tool for ScopeTool {
     }
     async fn execute(&self, args: &Value) -> ToolResult {
         let pin = args.get("pin").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-        let s = self.st.inner.lock().unwrap();
+        let s = self.st.inner.lock();
         match s.gpio.get(&pin) {
             Some(p) => {
                 let edge = if p.value == 1 { "rising" } else { "falling" };
@@ -289,7 +290,7 @@ impl Tool for ScopeTool {
 pub struct CodeEditTool { root: String, edits: Mutex<u32> }
 impl CodeEditTool {
     pub fn new(root: impl Into<String>) -> Arc<Self> { Arc::new(Self { root: root.into(), edits: Mutex::new(0) }) }
-    pub fn edits(&self) -> u32 { *self.edits.lock().unwrap() }
+    pub fn edits(&self) -> u32 { *self.edits.lock() }
 }
 
 #[async_trait]
@@ -315,7 +316,7 @@ impl Tool for CodeEditTool {
                 if let Err(e) = std::fs::write(&abs, content) {
                     return ToolResult::err("edit_file", format!("write: {e}"));
                 }
-                *self.edits.lock().unwrap() += 1;
+                *self.edits.lock() += 1;
                 ToolResult::ok("edit_file", json!({"path":path,"bytes":content.len()}))
             }
             Err(e) => ToolResult::err("edit_file", e),

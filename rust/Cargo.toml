@@ -30,6 +30,9 @@ toml = "1.1"
 clap = { version = "4.6", features = ["derive"] }
 anyhow = "1.0"
 async-trait = "0.1"
+# Mutex without poisoning — a panicked tool thread must not cascade-kill the
+# whole agent loop (std Mutex poisons on panic; parking_lot does not).
+parking_lot = "0.12"
 # GPIO character device (pure Rust, no libgpiod C dep). Linux-only; guarded.
 gpiod = { version = "0.3", optional = true }
 # I2C via linux-embedded-hal (pure Rust ioctl). Linux-only; guarded.

@@ -9,7 +9,7 @@
 #![cfg(feature = "hw")]
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use parking_lot::Mutex;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -213,10 +213,12 @@ impl Tool for I2cTool {
                 // i2cdump -y 1 <addr> b <reg> reads one byte per call; for N bytes we loop.
                 // For MVP simplicity read N bytes starting at reg via repeated i2cget.
                 let mut bytes = Vec::with_capacity(n);
+                let addr_hex = format!("0x{addr:02x}");
                 for i in 0..n {
                     let r = reg.wrapping_add(i as u8);
+                    // i2cget expects the address in hex (e.g. 0x76), not decimal.
                     let out = tokio::process::Command::new("i2cget")
-                        .args(["-y","1",&addr.to_string(),&format!("0x{r:02x}")]).output().await;
+                        .args(["-y","1",&addr_hex,&format!("0x{r:02x}")]).output().await;
                     match out {
                         Ok(o) if o.status.success() => {
                             let t = String::from_utf8_lossy(&o.stdout).trim().to_string();
@@ -226,12 +228,21 @@ impl Tool for I2cTool {
                         _ => bytes.push(0),
                     }
                 }
-                ToolResult::ok_unit("i2c", json!({
+                let raw_hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+                let mut out = json!({
                     "address":format!("0x{addr:02x}"),
                     "register":format!("0x{reg:02x}"),
-                    "raw_hex":format!("{:x?}",bytes),
+                    "raw_hex":raw_hex,
                     "raw_dec":bytes,
-                }), "bytes (see datasheet for scaling)")
+                });
+                // 2-byte reads: surface both endian interpretations (parity with Go).
+                if bytes.len() == 2 {
+                    let be = u16::from_be_bytes([bytes[0], bytes[1]]);
+                    let le = u16::from_le_bytes([bytes[0], bytes[1]]);
+                    out["be_uint16"] = json!(be);
+                    out["le_uint16"] = json!(le);
+                }
+                ToolResult::ok_unit("i2c", out, "bytes (see datasheet for scaling)")
             }
             other => ToolResult::err("i2c", format!("unknown action {other}")),
         }
@@ -295,7 +306,7 @@ impl Tool for TelemetryTool {
             "throttled" => {
                 let val = Self::read_throttled().unwrap_or(0);
                 let bits = ThrottledBits { now: val & (1<<0) != 0, since: val & (1<<16) != 0 };
-                *self.last.lock().unwrap() = bits;
+                *self.last.lock() = bits;
                 let notice = if bits.now || bits.since { Some("UNDERVOLTAGE detected — STOP before adding load; use a 5V/3A+ PSU.".into()) } else { None };
                 ToolResult { tool:"telemetry".into(), ok:true, value:Some(json!({"raw":format!("0x{val:x}"),"decoded":{"under_voltage_now":bits.now,"currently_throttled_now":val&(1<<2)!=0,"under_voltage_since_boot":bits.since,"throttled_since_boot":val&(1<<18)!=0}})), unit:None, error:None, notice }
             }

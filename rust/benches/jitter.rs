@@ -64,7 +64,9 @@ impl std::fmt::Display for JitterStats {
 
 fn bench_jitter(c: &mut Criterion) {
     let mut group = c.benchmark_group("scope_jitter");
-    group.sample_size(3); // 2s windows; few samples is plenty
+    // Criterion requires sample_size >= 10. Each sample is a 2s window, so 10
+    // samples = ~20s per bench run — acceptable for an occasional measurement.
+    group.sample_size(10);
     group.bench_function("1ms_cadence_2s", |b| {
         b.iter(|| {
             let s = measure_jitter(Duration::from_secs(2), Duration::from_millis(1));

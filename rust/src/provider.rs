@@ -17,7 +17,7 @@ pub struct Client {
     api_key: String,
     max_tokens: u32,
     temperature: f32,
-    metrics: std::sync::Mutex<Metrics>,
+    metrics: parking_lot::Mutex<Metrics>,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -39,7 +39,7 @@ impl Client {
             api_key: cfg.api_key.clone(),
             max_tokens: cfg.max_tokens,
             temperature: cfg.temperature,
-            metrics: std::sync::Mutex::new(Metrics::default()),
+            metrics: parking_lot::Mutex::new(Metrics::default()),
         })
     }
 
@@ -93,7 +93,7 @@ impl Client {
             cached: cc.usage.prompt_tokens_details.as_ref().map_or(0, |d| d.cached_tokens),
         };
         {
-            let mut m = self.metrics.lock().unwrap();
+            let mut m = self.metrics.lock();
             m.prompt_tokens += out.prompt_tokens;
             m.completion_tokens += out.completion;
             m.cached_tokens += out.cached;
@@ -103,7 +103,7 @@ impl Client {
     }
 
     pub fn metrics(&self) -> Metrics {
-        *self.metrics.lock().unwrap()
+        *self.metrics.lock()
     }
 }
 

@@ -64,13 +64,13 @@
 
         <div class="install">
           <div class="install-tabs">
-            <button class="install-tab active" data-cmd="go">go</button>
+            <button class="install-tab active" data-cmd="cargo">cargo</button>
             <button class="install-tab" data-cmd="build">build</button>
             <button class="install-tab" data-cmd="curl">curl</button>
           </div>
           <div class="code-block">
             <span class="prompt">$</span>
-            <span class="cmd">go install github.com/nitishagar/piforge/cmd/piforge@latest</span>
+            <span class="cmd">git clone https://github.com/nitishagar/piforge && cd piforge/rust && cargo build --release --features hw --bin piforge</span>
             <button class="copy-btn">copy</button>
           </div>
         </div>

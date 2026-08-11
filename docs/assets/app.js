@@ -4,9 +4,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const tabs = document.querySelectorAll(".install-tab");
   const cmdEl = document.querySelector(".code-block .cmd");
   const commands = {
-    go: "go install github.com/nitishagar/piforge/cmd/piforge@latest",
+    cargo:
+      "git clone https://github.com/nitishagar/piforge && cd piforge/rust && cargo build --release --features hw --bin piforge",
     build:
-      "git clone https://github.com/nitishagar/piforge && cd piforge && make build-arm64",
+      "git clone https://github.com/nitishagar/piforge && cd piforge/rust && cargo build --release --features hw --target aarch64-unknown-linux-gnu --bin piforge",
     curl: "curl -fsSL https://github.com/nitishagar/piforge/raw/main/dist/piforge-arm64 -o piforge && chmod +x piforge",
   };
   tabs.forEach((tab) => {

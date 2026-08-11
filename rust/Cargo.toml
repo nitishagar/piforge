@@ -50,5 +50,10 @@ panic = "abort"
 strip = true
 
 [dev-dependencies]
-# For unit tests of the broker/sim/eval logic.
+# For unit tests of the broker/sim/eval logic + the scope-jitter benchmark.
 tokio = { version = "1.53", features = ["test-util"] }
+criterion = { version = "0.5", default-features = false, features = ["plotters", "cargo_bench_support"] }
+
+[[bench]]
+name = "jitter"
+harness = false

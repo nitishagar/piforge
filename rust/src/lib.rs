@@ -20,3 +20,6 @@ pub mod eval;
 pub mod hil;
 pub mod provider;
 pub mod sim;
+
+#[cfg(feature = "hw")]
+pub mod hil_hw;

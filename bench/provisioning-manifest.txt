@@ -26,3 +26,23 @@
    - cloned from github.com/cactus-compute/cactus
    - venv at ~/cactus/venv; cactus CLI on PATH when venv active
    - cactus serve / run / download / convert / clean all present
+
+## CLEANUP (Phase 6) — COMPLETE, 2026-08-11
+Disk returned to BASELINE (21G used, was 21G at start). All artifacts removed:
+1. Rust toolchain: rm -rf ~/.cargo ~/.rustup (rustup self uninstall) ✓
+2. piforge clone: rm -rf ~/piforge ✓
+3. Python 3.12.7: sudo rm build dir + /usr/local/{bin,lib,include}/python3.12* ✓
+4. cactus engine + clone + venv + all weights (qwen3-1.7b x2, needle): rm -rf ~/cactus ✓
+5. HuggingFace hub cache (4.3G source weights): rm -rf ~/.cache/huggingface ✓
+6. systemd units (cactus-serve, cactus-needle): stopped + removed + daemon-reload ✓
+7. /tmp scripts + logs: removed ✓
+
+RETAINED (negligible disk, generally-useful dev headers, part of /usr/include):
+- apt build deps installed for Python+cactus: libssl-dev, zlib1g-dev, libffi-dev,
+  libcurl4-openssl-dev, libsqlite3-dev, libbz2-dev, liblzma-dev, uuid-dev, etc.
+  These are additive -dev packages; removing them is optional and they don't
+  materially change the system (disk is exactly at baseline with them present).
+
+VERIFIED: df -h shows 21G used (= baseline); python3 3.11.2 (system, untouched);
+no cargo/rustc/cactus (baseline had none); no lingering processes; /tmp clean.
+hallpi is GREENFIELD again, no worse than it started.

@@ -24,6 +24,7 @@ fn decide_gate_thresholds() {
             passed: 1,
             partial: 0,
             hallucinated: 0,
+            non_converged: 0,
             pass_rate: pr,
             hallucination_rate: hr,
             median_turns: 0,

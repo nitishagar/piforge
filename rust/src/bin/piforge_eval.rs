@@ -7,7 +7,7 @@ use clap::Parser;
 use piforge::{
     agent::LlmClient,
     config,
-    eval::{decide, summarize, Runner},
+    eval::{decide, model_too_weak_banner, summarize, Runner},
     provider::Client,
 };
 
@@ -44,7 +44,13 @@ async fn main() -> Result<()> {
     eprintln!("piforge-eval: running cases from {}", cfg.eval.cases_dir);
     let verdicts = runner
         .run_all(&cfg.eval.cases_dir, |v| {
-            let status = if v.pass_ { "PASS" } else { "FAIL" };
+            let status = if v.pass_ {
+                "PASS"
+            } else if v.non_converged {
+                "NONC"
+            } else {
+                "FAIL"
+            };
             let extra = if v.hallucination { " [HALLUC]" } else { "" };
             let notes: String = v.notes.chars().take_while(|&c| c != '\n').collect();
             eprintln!(
@@ -70,8 +76,8 @@ async fn main() -> Result<()> {
     );
     println!("\n=== Summary ===");
     println!(
-        "cases={} passed={} partial={} hallucinated={}",
-        s.total, s.passed, s.partial, s.hallucinated
+        "cases={} passed={} partial={} hallucinated={} non_converged={}",
+        s.total, s.passed, s.partial, s.hallucinated, s.non_converged
     );
     println!(
         "pass_rate={:.0}% halluc_rate={:.0}% median_turns={} mean_cache_hit={:.0}%",
@@ -85,6 +91,12 @@ async fn main() -> Result<()> {
         cfg.eval.pass_rate_threshold * 100.0,
         cfg.eval.hallucination_threshold * 100.0
     );
+    // Turn-exhaustion banner: a run where most cases didn't converge means the
+    // model is too weak / context too short for the decision to be trusted.
+    // Reported alongside the decision, NOT folded into it.
+    if model_too_weak_banner(&s) {
+        println!("MODEL_TOO_WEAK_OR_CONTEXT_TOO_SHORT — verdict unreliable");
+    }
     println!("DECISION: {decision}");
     Ok(())
 }

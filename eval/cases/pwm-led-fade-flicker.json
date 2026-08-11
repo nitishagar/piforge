@@ -1,0 +1,22 @@
+{
+  "id": "pwm-led-fade-flicker",
+  "archetype": "pwm-backend-jitter",
+  "symptom": "my LED fade animation visibly flickers. I drive an LED with a software PWM loop in pure Python on the Pi 5, stepping the duty cycle manually.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "gpio_pins": { "12": "output" },
+    "files": {
+      "fade.py": "import time\nimport RPi.GPIO as GPIO\nGPIO.setmode(GPIO.BCM)\nGPIO.setup(12, GPIO.OUT)\nlevel = 0\nwhile True:\n    for _ in range(level):\n        GPIO.output(12, 1)\n        time.sleep(0.0001)\n    for _ in range(100 - level):\n        GPIO.output(12, 0)\n        time.sleep(0.0001)\n    level = (level + 1) % 100\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "Manual software PWM in Python flickers because the loop timing is not deterministic on a non-realtime kernel. The Pi exposes hardware PWM0 on BCM12/BCM18; drive it with gpiozero PWMLED(12), which uses lgpio's hardware-timed PWM on the Pi 5 for a clean fade.",
+    "fix_applies": "fade.py",
+    "fix_must_contain": ["gpiozero", "PWMLED(12)"],
+    "fix_must_not_have": ["time.sleep(0.0001)", "RPi.GPIO"],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["pigpio", "BCM17"]
+}

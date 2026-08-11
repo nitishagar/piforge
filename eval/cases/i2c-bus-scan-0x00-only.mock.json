@@ -1,0 +1,25 @@
+[
+  {
+    "tool_calls": [
+      {
+        "id": "i2c-1",
+        "type": "function",
+        "function": {
+          "name": "i2c",
+          "arguments": "{\"action\": \"scan\"}"
+        }
+      }
+    ],
+    "text": "",
+    "prompt_tokens": 120,
+    "completion": 50,
+    "cached": 0
+  },
+  {
+    "tool_calls": [],
+    "text": "Only the general-call address 0x00 ACKs \u2014 that means SDA is stuck low (shorted to GND, or a powered-down device clamping the line). The controller then reads an ACK on every address because SDA never rises. This is a wiring fault. STOP coding; check for an SDA-to-GND short and that every device on the bus is powered.",
+    "prompt_tokens": 200,
+    "completion": 50,
+    "cached": 180
+  }
+]

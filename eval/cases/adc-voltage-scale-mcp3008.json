@@ -1,0 +1,21 @@
+{
+  "id": "adc-voltage-scale-mcp3008",
+  "archetype": "unit-conversion",
+  "symptom": "my MCP3008 SPI ADC code returns ~512 for a 2.5V input on a 5V reference. The expected value is 2.5 (volts), not 512.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "files": {
+      "adc.py": "def to_volts(raw, vref):\n    # raw is a 10-bit count (0..1023)\n    return raw\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "The MCP3008 is a 10-bit ADC: raw counts 0..1023. Volts = raw * vref / 1023. The code returns the raw count instead of scaling. Divide the count by 1023 and multiply by the reference voltage.",
+    "fix_applies": "adc.py",
+    "fix_must_contain": ["vref", "/ 1023"],
+    "fix_must_not_have": [],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["0x76", "0x68", "/ 4095"]
+}

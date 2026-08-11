@@ -447,7 +447,13 @@ impl Tool for CodeEditTool {
 /// Resolve a relative path under root, rejecting traversal + symlink escapes.
 /// Mirrors the (fixed) Go safe() helper: evaluates symlinks, uses a
 /// path-separator boundary for the ".." check.
-fn safe_join(root: &str, rel: &str) -> Result<std::path::PathBuf, String> {
+///
+/// Public so the eval harness can reuse it when seeding a workspace from
+/// fixture `files` (untrusted JSON keys) — the SAME containment check the
+/// `edit_file` tool applies to agent-driven writes must also gate the
+/// initial fixture-driven writes, or a fixture key like `"../../etc/x"`
+/// escapes the workspace.
+pub fn safe_join(root: &str, rel: &str) -> Result<std::path::PathBuf, String> {
     use std::path::{Component, PathBuf};
     if std::path::Path::new(rel).is_absolute() {
         return Err("path must be relative to workspace root".into());

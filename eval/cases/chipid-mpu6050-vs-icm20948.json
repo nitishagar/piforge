@@ -1,0 +1,21 @@
+{
+  "id": "chipid-mpu6050-vs-icm20948",
+  "archetype": "wrong-register-device-variant",
+  "symptom": "my 'MPU6050' IMU at address 0x69 reads zero acceleration. The WHO_AM_I read returns 0xEA, not the 0x68 I expect.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": { "105": "ICM-20948" },
+    "files": {
+      "imu.py": "from board import *\nfrom adafruit_mpu6050 import MPU6050\ni2c = I2C(scl, sda)\nimu = MPU6050(i2c, address=0x69)\nprint(imu.acceleration)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "WHO_AM_I value 0xEA is an ICM-20948 (9-axis IMU), not an MPU6050 (which returns 0x68 and reads it from register 0x75; the ICM-20948 WHO_AM_I is at register 0x70). The MPU6050 driver reads nonexistent registers on the ICM-20948, hence zero accel. Switch to the Adafruit ICM20948 driver.",
+    "fix_applies": "imu.py",
+    "fix_must_contain": ["ICM20948", "adafruit_icm20x"],
+    "fix_must_not_have": ["MPU6050", "adafruit_mpu6050"],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["0x76", "0x68", "BMP280"]
+}

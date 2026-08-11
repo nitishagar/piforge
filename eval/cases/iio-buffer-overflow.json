@@ -1,0 +1,21 @@
+{
+  "id": "iio-buffer-overflow",
+  "archetype": "iio-scale-misapply",
+  "symptom": "reading my IIO accelerometer buffer gives fewer samples than requested and occasionally garbage. I do a raw read() of /dev/iio:device0 with a fixed byte count that ignores the scan_size.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "files": {
+      "iio_read.py": "def read_samples(buf_fd, n):\n    # read n*4 bytes; assumes each sample is 4 bytes\n    return buf_fd.read(n * 4)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "The IIO buffer returns whole scan elements whose size is in_voltage0_scale-derived scan_size, not a fixed 4 bytes. A fixed-length read misaligns samples and returns partial/garbage data. Compute the byte count from scan_size (and number of enabled channels) and read in whole-scan units, checking the returned byte count.",
+    "fix_applies": "iio_read.py",
+    "fix_must_contain": ["scan_size", "read(scan_size"],
+    "fix_must_not_have": [],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["0x76", "dtparam"]
+}

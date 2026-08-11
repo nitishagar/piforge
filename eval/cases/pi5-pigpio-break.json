@@ -1,0 +1,22 @@
+{
+  "id": "pi5-pigpio-break",
+  "archetype": "pi5-lgpio-migration",
+  "symptom": "my daemon-driven GPIO script fails on the new Pi 5. It opens the pigpio daemon socket and gets 'socket connect failed' / no GPIO access.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "gpio_pins": { "17": "output" },
+    "files": {
+      "app.py": "import pigpio\npi = pigpio.pi()\npi.set_mode(17, pigpio.OUTPUT)\npi.write(17, 1)\npi.stop()\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "The pigpio daemon (pigpiod) drives BCM283x mmio registers directly and is broken on the Pi 5, whose GPIO is on the RP1 southbridge exposed via /dev/gpiochipN. Only lgpio works natively. Rewrite using gpiozero, which auto-selects lgpio on the Pi 5.",
+    "fix_applies": "app.py",
+    "fix_must_contain": ["gpiozero", "LED(17)"],
+    "fix_must_not_have": ["import pigpio", "pigpio.pi()"],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["BCM2835", "WiringPi"]
+}

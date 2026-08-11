@@ -1,0 +1,22 @@
+{
+  "id": "pwm-audio-hardware-clock",
+  "archetype": "pwm-backend-jitter",
+  "symptom": "I generate a 1kHz tone by bit-banging a GPIO with a Python sleep loop on the Pi 5. The output crackles and drifts. I need a clean, jitter-free clock.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "gpio_pins": { "12": "output", "18": "output" },
+    "files": {
+      "tone.py": "from time import sleep\nimport RPi.GPIO as GPIO\nGPIO.setmode(GPIO.BCM)\nGPIO.setup(18, GPIO.OUT)\n# bit-bang 1kHz\nwhile True:\n    GPIO.output(18, 1)\n    sleep(0.0005)\n    GPIO.output(18, 0)\n    sleep(0.0005)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "A Python sleep loop is not deterministic under a non-realtime kernel, so the bit-banged waveform crackles and drifts. Use a hardware-timed clock: gpiozero TonalBuzzer / PWMOutputDevice on BCM12 or BCM18 (the hardware PWM0 pins), driven by lgpio's hardware clock on Pi 5.",
+    "fix_applies": "tone.py",
+    "fix_must_contain": ["gpiozero", "PWMOutputDevice(12)"],
+    "fix_must_not_have": ["sleep(0.0005)", "bit-bang"],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["pigpio", "BCM13"]
+}

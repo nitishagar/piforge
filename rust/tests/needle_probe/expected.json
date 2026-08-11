@@ -1,0 +1,29 @@
+{
+  "_comment": "Pre-declared criterion for the Needle spike. Committed to the repo BEFORE `cactus run Cactus-Compute/needle` is invoked. The spike report records the git SHA of this file at run time so post-hoc edits are auditable. Loosening this requires a new commit + visible diff.",
+  "_criterion": "GO iff Needle dispatches piforge's 6 tools with schema-valid args on >=8/10 prompts AND hallucinates zero non-existent tools. NO-GO otherwise.",
+  "thresholds": {
+    "min_schema_valid_dispatches": 8,
+    "max_hallucinated_tools": 0,
+    "total_prompts": 10
+  },
+  "tools_in_scope": [
+    "hardware_inventory",
+    "telemetry",
+    "i2c",
+    "gpio",
+    "scope",
+    "edit_file"
+  ],
+  "prompts": {
+    "p1": { "expected_tool": "hardware_inventory" },
+    "p2": { "expected_tool": "telemetry", "required_args": { "action": "snapshot" } },
+    "p3": { "expected_tool": "i2c", "required_args": { "action": "detect", "address": 118 } },
+    "p4": { "expected_tool": "i2c", "required_args": { "action": "scan" } },
+    "p5": { "expected_tool": "gpio", "required_args": { "action": "get", "pin": 17 } },
+    "p6": { "expected_tool": "gpio", "required_args": { "action": "set", "pin": 17, "value": 1 } },
+    "p7": { "expected_tool": "scope", "required_args": { "pin": 18, "duration": 0.5 } },
+    "p8": { "expected_tool": "telemetry", "required_args": { "action": "temp" } },
+    "p9": { "expected_tool": "i2c", "required_args": { "action": "read", "address": 119, "register": 208, "length": 2 } },
+    "p10": { "expected_tool": "edit_file", "required_args": { "path": "main.py" } }
+  }
+}

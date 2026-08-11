@@ -1,0 +1,21 @@
+{
+  "id": "1wire-overlay-wrong-gpio",
+  "archetype": "1wire-overlay-missing",
+  "symptom": "I added dtoverlay=w1-gpio but my DS18B20 still doesn't appear under /sys/bus/w1/devices. The sensor data line is wired to GPIO17, not the default pin.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "files": {
+      "config.txt": "# /boot/firmware/config.txt\ndtparam=i2c_arm=on\nenable_uart=1\ndtoverlay=w1-gpio\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "The w1-gpio overlay defaults to GPIO4 (BCM4). The sensor is wired to GPIO17, so the bus comes up on the wrong pin and the device never enumerates. Set the pin explicitly with dtoverlay=w1-gpio,gpiopin=17 and reboot.",
+    "fix_applies": "config.txt",
+    "fix_must_contain": ["dtoverlay=w1-gpio,gpiopin=17"],
+    "fix_must_not_have": [],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["0x76", "dtparam=i2c_arm=on"]
+}

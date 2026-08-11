@@ -1,0 +1,21 @@
+{
+  "id": "chipid-bmp390-vs-bmp280",
+  "archetype": "wrong-register-device-variant",
+  "symptom": "my 'BME280' pressure reads fine but humidity is always 100% and temperature is off by a few degrees.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": { "118": "BMP390" },
+    "files": {
+      "bme.py": "from board import *\nfrom adafruit_bme280 import basic as adafruit_bme280\ni2c = I2C(scl, sda)\nbme = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)\nprint(bme.humidity)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "Register 0xD0 reads 0x60 on a BME280 but here reads 0x50 — that's a BMP390, not a BME280/BMP280. The BMP390 has no humidity; the BME280 driver returns a stale/garbage humidity. Use adafruit_bmp3xx with the BMP390.",
+    "fix_applies": "bme.py",
+    "fix_must_contain": ["adafruit_bmp3xx", "BMP3XX"],
+    "fix_must_not_have": ["Adafruit_BME280"],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["0x77", "0x60", "BMP280"]
+}

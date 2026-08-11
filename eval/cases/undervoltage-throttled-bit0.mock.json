@@ -1,0 +1,25 @@
+[
+  {
+    "tool_calls": [
+      {
+        "id": "telemetry-1",
+        "type": "function",
+        "function": {
+          "name": "telemetry",
+          "arguments": "{\"action\": \"throttled\"}"
+        }
+      }
+    ],
+    "text": "",
+    "prompt_tokens": 130,
+    "completion": 50,
+    "cached": 0
+  },
+  {
+    "tool_calls": [],
+    "text": "get_throttled returns 0x1 \u2014 bit 0 is 'under-voltage NOW' (currently active), distinct from bit 16 ('has occurred since boot'). The supply is too low at this moment and USB devices are dropping. This is a power supply problem, not code \u2014 use a 5V/3A+ PSU and don't draw peripherals from the Pi rail. STOP coding.",
+    "prompt_tokens": 210,
+    "completion": 50,
+    "cached": 190
+  }
+]

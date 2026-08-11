@@ -19,6 +19,14 @@ path = "src/bin/piforge.rs"
 name = "piforge-eval"
 path = "src/bin/piforge_eval.rs"
 
+# Needle spike criterion — pre-declared GO/NO-GO test. Sits in a subdir so its
+# sibling data files (prompts.jsonl, expected.json, needle_raw_output.json) live
+# alongside it. The main criterion test is #[ignore] (needs the hallpi spike
+# output); the self-consistency check runs in CI.
+[[test]]
+name = "needle_criterion"
+path = "tests/needle_probe/needle_criterion.rs"
+
 [dependencies]
 # Async runtime + HTTP client (talks to local llama-server OpenAI-compat endpoint).
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "signal", "time", "sync", "fs", "process"] }

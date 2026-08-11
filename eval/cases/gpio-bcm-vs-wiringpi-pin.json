@@ -1,0 +1,22 @@
+{
+  "id": "gpio-bcm-vs-wiringpi-pin",
+  "archetype": "gpio-numbering",
+  "symptom": "I ported an old WiringPi script to gpiozero and kept pin 6 (the physical pin 12 the LED is on). The LED never lights.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "gpio_pins": { "18": "output" },
+    "files": {
+      "blink.py": "from gpiozero import LED\nfrom time import sleep\n# physical pin 12 was WiringPi 6 in the old script\nled = LED(6)\nwhile True:\n    led.on()\n    sleep(0.5)\n    led.off()\n    sleep(0.5)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "WiringPi and gpiozero use different numbering schemes. Physical pin 12 is BCM GPIO18, which WiringPi calls 6. gpiozero uses BCM, so the LED must be LED(18), not the WiringPi number 6.",
+    "fix_applies": "blink.py",
+    "fix_must_contain": ["LED(18)"],
+    "fix_must_not_have": ["LED(6)", "LED(1)"],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["WiringPi", "BOARD", "GPIO4"]
+}

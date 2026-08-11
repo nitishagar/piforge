@@ -1,0 +1,21 @@
+{
+  "id": "wrong-i2c-address-tcs34725-0x29",
+  "archetype": "wrong-i2c-address",
+  "symptom": "my TCS34725 RGB color sensor won't initialize. The Adafruit example uses address 0x29 but my code uses the 0x39 default from a different breakout and throws 'no device'.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": { "41": "TCS34725" },
+    "files": {
+      "color.py": "import board, busio\nfrom adafruit_tcs34725 import TCS34725\ni2c = busio.I2C(board.SCL, board.SDA)\nsensor = TCS34725(i2c)\nprint(sensor.color_rgb_bytes)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "i2cdetect shows the TCS34725 at 0x29 (41). The TCS34725 has a fixed address of 0x29, but some example code defaults to 0x39 (a different breakout variant). Pass address=0x29.",
+    "fix_applies": "color.py",
+    "fix_must_contain": ["address=0x29"],
+    "fix_must_not_have": ["0x39", "0x76", "0x68"],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["0x39", "0x76", "0x68"]
+}

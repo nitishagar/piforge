@@ -1,0 +1,25 @@
+[
+  {
+    "tool_calls": [
+      {
+        "id": "telemetry-1",
+        "type": "function",
+        "function": {
+          "name": "telemetry",
+          "arguments": "{\"action\": \"snapshot\"}"
+        }
+      }
+    ],
+    "text": "",
+    "prompt_tokens": 130,
+    "completion": 50,
+    "cached": 110
+  },
+  {
+    "tool_calls": [],
+    "text": "vcgencmd get_throttled shows undervoltage has occurred (bit 16). This is a power-supply problem, not code \u2014 use a 5V/3A+ PSU and don't power servos from the 3.3V rail. STOP coding.",
+    "prompt_tokens": 210,
+    "completion": 50,
+    "cached": 190
+  }
+]

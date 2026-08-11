@@ -1,0 +1,19 @@
+{
+  "id": "i2c-bus-scan-none",
+  "archetype": "i2c-scan-all-addresses",
+  "symptom": "i2cdetect -y 1 shows an empty grid — no devices at all. My BME280 is on the bus and was working yesterday. Nothing I change in code helps.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "files": {},
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "An empty i2cdetect grid with a device attached means SDA and/or SCL is disconnected (or VCC to the sensor is missing), or the pull-ups are absent. The kernel sees no ACK from any address. This is a wiring fault; STOP coding and check the SDA/SCL/VCC/GND connections and the pull-up resistors.",
+    "fix_applies": "",
+    "fix_must_contain": [],
+    "fix_must_not_have": [],
+    "is_hardware_fault": true
+  },
+  "hallucinated": ["0x76", "0x68", "register"]
+}

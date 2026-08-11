@@ -1,0 +1,22 @@
+{
+  "id": "gpio-input-pullup-button",
+  "archetype": "gpio-numbering",
+  "symptom": "my pushbutton reads random 0/1 values when not pressed. It's wired between BCM GPIO2 and GND (no external pull-up resistor). I expected it to read 1 when not pressed.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "gpio_pins": { "2": "input" },
+    "files": {
+      "btn.py": "from gpiozero import Button\nfrom signal import pause\n# Button wired BCM2 -> GND, no external pull-up.\nbtn = Button(2)\npause()\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "The button has no external pull-up and the internal pull is not enabled, so the pin floats and reads randomly. gpiozero Button enables the internal pull-up by default (pull_up=True), so Button(2) should already pull the pin high when not pressed. If the wiring needs the internal pull explicitly, pass Button(2, pull_up=True); the key point is the pin must not float.",
+    "fix_applies": "btn.py",
+    "fix_must_contain": ["pull_up=True"],
+    "fix_must_not_have": [],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["LED(2)", "PWMLED", "BCM18"]
+}

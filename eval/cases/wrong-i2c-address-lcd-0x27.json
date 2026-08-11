@@ -1,0 +1,21 @@
+{
+  "id": "wrong-i2c-address-lcd-0x27",
+  "archetype": "wrong-i2c-address",
+  "symptom": "my 16x2 I2C LCD backpack never initializes. The example hardcodes 0x3f and I get an I2C error.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": { "39": "PCF8574" },
+    "files": {
+      "lcd.py": "import board, busio\nfrom lcd_i2c import LCD\ni2c = busio.I2C(board.SCL, board.SDA)\nlcd = LCD(i2c, address=0x3f)\nlcd.write('hello')\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "i2cdetect shows the PCF8574 LCD backpack at 0x27 (39), not 0x3f (63). The 0x3f/0x27 split is the classic PCF8574 vs PCF8574A variant difference; many examples hardcode 0x3f. This backpack uses 0x27. Change the address.",
+    "fix_applies": "lcd.py",
+    "fix_must_contain": ["address=0x27"],
+    "fix_must_not_have": ["0x3f", "0x76", "0x68"],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["0x3f", "0x76", "0x68"]
+}

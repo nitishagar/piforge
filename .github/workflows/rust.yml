@@ -34,7 +34,18 @@ jobs:
       - name: Mock eval parity check
         run: |
           ./target/release/piforge-eval --mock --config Cargo.toml --cases ../eval/cases | tee /tmp/out.txt
-          grep -q "DECISION: PIVOT_TO_CLOUD" /tmp/out.txt
+          # The mock-mode gate proves the harness + scripts + scorer AGREE: if
+          # every fixture's mock script drives a PASS, pass_rate must be 100%.
+          # This replaced the foregone `grep "DECISION: PIVOT_TO_CLOUD"` (which
+          # asserted a structurally-foregone conclusion when 10/13 cases were
+          # no-ops). A regression in any script or the scorer now FAILS the gate.
+          grep -q "pass_rate=100%" /tmp/out.txt
+          # Sanity: the harness must not report non-convergence or hallucination
+          # in mock mode (the scripts are deterministic).
+          grep -q "non_converged=0" /tmp/out.txt
+          grep -q "hallucinated=0" /tmp/out.txt
+          # And the decision under a 100% pass_rate must be BUILD_LOCAL.
+          grep -q "DECISION: BUILD_LOCAL" /tmp/out.txt
 
   # Cross-compile the real hw binary to the Pi 5 target.
   cross-compile-arm64:

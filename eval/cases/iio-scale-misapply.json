@@ -1,17 +1,20 @@
 {
   "id": "iio-scale-misapply",
   "archetype": "iio-scale-misapply",
-  "symptom": "I'm reading /sys/bus/iio/devices/iio:device0/in_voltage0_raw and getting 4095, which is wrong — my ADC is 1.8V and I expect ~2300 for 1.0V",
+  "symptom": "I'm reading /sys/bus/iio/devices/iio:device0/in_voltage0_raw and getting 4095, which is wrong — my ADC is 1.8V and I expect ~2300 for 1.0V. The raw read looks fine, my Python just returns the raw int.",
   "setup": {
     "board": "Raspberry Pi 5 Model B Rev 1.0",
     "i2c_devices": {},
+    "files": {
+      "adc.py": "def read_volts(raw, in_voltage_scale):\n    # in_voltage_scale is millivolts per LSB (from /sys/bus/iio/.../in_voltage_scale)\n    return raw\n"
+    },
     "dmesg_tail": [],
     "throttled": "0x0"
   },
   "gold": {
-    "diagnosis": "The raw IIO value must be multiplied by in_voltage_scale to get volts. If scale is 0.439453125 (mV), then 4095 * 0.439453125 / 1000 ≈ 1.8V (saturated). The reading of 4095 means the input exceeds the ADC range. The code likely forgets to apply the scale or uses the wrong reference voltage.",
-    "fix_applies": "",
-    "fix_must_contain": [],
+    "diagnosis": "The raw IIO value must be multiplied by in_voltage_scale to get volts. If scale is 0.439453125 (mV), then 4095 * 0.439453125 / 1000 ≈ 1.8V (saturated). The code returns raw without applying the scale and the /1000 mV->V conversion.",
+    "fix_applies": "adc.py",
+    "fix_must_contain": ["* in_voltage_scale", "/ 1000"],
     "fix_must_not_have": [],
     "is_hardware_fault": false
   },

@@ -5,6 +5,9 @@
   "setup": {
     "board": "Raspberry Pi 5 Model B Rev 1.0",
     "i2c_devices": {},
+    "files": {
+      "config.txt": "# /boot/firmware/config.txt\ndtparam=i2c_arm=on\nenable_uart=1\n"
+    },
     "dmesg_tail": [],
     "throttled": "0x0"
   },

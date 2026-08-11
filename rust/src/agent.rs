@@ -4,7 +4,7 @@
 //! tool schemas are a byte-stable prefix; message history is append-only.
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
@@ -18,6 +18,47 @@ use crate::provider::{ChatMessage, ChatRequest, ChatResponse, Client, Tool as Pr
 pub trait LlmClient: Send + Sync {
     async fn chat(&self, req: &ChatRequest) -> Result<ChatResponse>;
 }
+
+/// Typed errors from the agent loop. Distinguishing turn-budget exhaustion from
+/// provider/chat failures lets the eval gate report a "model never converged"
+/// signal separately from "model answered wrong" — a too-weak model is not the
+/// same verdict as a wrong answer.
+///
+/// Implements `std::error::Error + Send + Sync + 'static` so callers using
+/// `?` into `anyhow::Error` (e.g. `bin/piforge.rs`) continue to compile and
+/// propagate via the same path.
+#[derive(Debug)]
+pub enum AgentError {
+    /// The model kept emitting tool calls until the turn budget was consumed
+    /// without ever producing a terminal text response. Eval maps this to
+    /// `Verdict.non_converged = true`.
+    TurnBudgetExhausted,
+    /// A chat() call to the provider failed at the given turn. `message` is the
+    /// underlying provider error string (anyhow's `{e}`), kept as a `String`
+    /// so the enum is `Send + Sync + 'static`.
+    Chat { turn: u32, message: String },
+}
+
+impl std::fmt::Display for AgentError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AgentError::TurnBudgetExhausted => write!(
+                f,
+                "turn budget exhausted without a terminal response (model did not converge)"
+            ),
+            AgentError::Chat { turn, message } => {
+                write!(f, "turn {turn}: {message}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for AgentError {}
+
+// No manual `From<AgentError> for anyhow::Error` is needed: anyhow provides a
+// blanket `From<E> for anyhow::Error where E: StdError + Send + Sync + 'static`,
+// which `AgentError` satisfies. This is what lets `bin/piforge.rs`'s
+// `agent.run(...)?` (returning `anyhow::Result`) compile.
 
 #[async_trait]
 impl LlmClient for Client {
@@ -89,7 +130,12 @@ impl Agent {
 
     /// Run one task. `user_msg` is the user's symptom. `on_text` (optional)
     /// receives assistant text as it finalizes per turn.
-    pub async fn run<F>(&self, user_msg: &str, mut on_text: F) -> Result<RunResult>
+    ///
+    /// Returns `Result<RunResult, AgentError>` — a typed error so the eval gate
+    /// can distinguish turn-budget exhaustion (`TurnBudgetExhausted`) from a
+    /// provider/chat failure (`Chat`). Both convert into `anyhow::Error` for
+    /// callers that propagate with `?` (e.g. the interactive binary).
+    pub async fn run<F>(&self, user_msg: &str, mut on_text: F) -> Result<RunResult, AgentError>
     where
         F: FnMut(&str),
     {
@@ -120,11 +166,11 @@ impl Agent {
                 tool_choice: Some(json!("auto")),
                 max_tokens: None,
             };
-            let resp: ChatResponse = self
-                .client
-                .chat(&req)
-                .await
-                .map_err(|e| anyhow!("turn {turn}: {e}"))?;
+            let resp: ChatResponse =
+                self.client.chat(&req).await.map_err(|e| AgentError::Chat {
+                    turn,
+                    message: format!("{e}"),
+                })?;
             acc_prompt += resp.prompt_tokens;
             acc_completion += resp.completion;
             acc_cached += resp.cached;
@@ -170,7 +216,7 @@ impl Agent {
                 });
             }
         }
-        Err(anyhow!("turn budget exhausted without a terminal response"))
+        Err(AgentError::TurnBudgetExhausted)
     }
 
     async fn dispatch(&self, call: &ToolCall) -> String {

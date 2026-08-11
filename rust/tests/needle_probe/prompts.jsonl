@@ -1,0 +1,10 @@
+{"id":"p1","prompt":"What hardware is connected to this Pi? List the board and any I2C devices and GPIO pins in use.","expected_tool":"hardware_inventory","expected_args":{"action_optional":true}}
+{"id":"p2","prompt":"Give me a health snapshot of the Pi — temperature, voltage, and the throttled bitmask.","expected_tool":"telemetry","expected_args":{"action":"snapshot"}}
+{"id":"p3","prompt":"Is the device at I2C address 0x76 present? Detect it.","expected_tool":"i2c","expected_args":{"action":"detect","address":118}}
+{"id":"p4","prompt":"Scan the I2C bus and tell me which addresses respond.","expected_tool":"i2c","expected_args":{"action":"scan"}}
+{"id":"p5","prompt":"Read the value of GPIO pin 17.","expected_tool":"gpio","expected_args":{"action":"get","pin":17}}
+{"id":"p6","prompt":"Set GPIO pin 17 high.","expected_tool":"gpio","expected_args":{"action":"set","pin":17,"value":1}}
+{"id":"p7","prompt":"Capture edge events on GPIO pin 18 for 0.5 seconds and report the rate.","expected_tool":"scope","expected_args":{"pin":18,"duration":0.5}}
+{"id":"p8","prompt":"What's the current temperature reading from telemetry? Use the temp action.","expected_tool":"telemetry","expected_args":{"action":"temp"}}
+{"id":"p9","prompt":"Read 2 bytes starting at register 0xD0 from the I2C device at address 0x77.","expected_tool":"i2c","expected_args":{"action":"read","address":119,"register":208,"length":2}}
+{"id":"p10","prompt":"Write the file main.py with the content: print('hello'). Use the edit tool.","expected_tool":"edit_file","expected_args":{"path":"main.py","content_contains":"print('hello')"}}

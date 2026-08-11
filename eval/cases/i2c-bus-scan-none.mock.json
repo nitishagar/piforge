@@ -1,0 +1,25 @@
+[
+  {
+    "tool_calls": [
+      {
+        "id": "i2c-1",
+        "type": "function",
+        "function": {
+          "name": "i2c",
+          "arguments": "{\"action\": \"scan\"}"
+        }
+      }
+    ],
+    "text": "",
+    "prompt_tokens": 120,
+    "completion": 50,
+    "cached": 0
+  },
+  {
+    "tool_calls": [],
+    "text": "i2cdetect shows an empty grid even though a device is attached \u2014 that means SDA and/or SCL (or sensor VCC) is disconnected, or the pull-up resistors are missing. The controller never sees an ACK. This is a wiring fault. STOP coding; rewire SDA/SCL/VCC/GND and confirm the pull-ups before retrying.",
+    "prompt_tokens": 200,
+    "completion": 50,
+    "cached": 180
+  }
+]

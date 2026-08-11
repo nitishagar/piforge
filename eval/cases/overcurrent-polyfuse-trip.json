@@ -1,0 +1,24 @@
+{
+  "id": "overcurrent-polyfuse-trip",
+  "archetype": "undervoltage-brownout",
+  "symptom": "my Pi 5 reboots a few seconds after I plug a 2A motor driver into the 5V pin. After each reboot the board is fine until I enable the motor again.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "gpio_pins": { "17": "output" },
+    "dmesg_tail": [
+      "Under-voltage detected!",
+      "polyfuse trip suspected",
+      "bcm2712: reboot reason: watchdog/power"
+    ],
+    "throttled": "0x10000"
+  },
+  "gold": {
+    "diagnosis": "The motor driver's inrush/current is pulling the 5V rail down and tripping the polyfuse, resetting the board. This is a hardware fault, not a code bug: motors must be powered from a separate supply, not the Pi 5V pin. STOP coding and rewire the power.",
+    "fix_applies": "",
+    "fix_must_contain": [],
+    "fix_must_not_have": [],
+    "is_hardware_fault": true
+  },
+  "hallucinated": ["0x76", "register", "dtparam"]
+}

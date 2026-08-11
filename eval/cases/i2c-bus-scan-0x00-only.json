@@ -1,0 +1,19 @@
+{
+  "id": "i2c-bus-scan-0x00-only",
+  "archetype": "i2c-scan-all-addresses",
+  "symptom": "i2cdetect shows only the general-call address 0x00 as present and nothing else, even with no device that should ACK 0x00. My sensor never responds at its real address.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "files": {},
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "When only the general-call address 0x00 ACKs, SDA is stuck low (often shorted to GND or a sensor holding the line). The controller reads an ACK on every address because the line never rises. This is a wiring/hardware fault; STOP coding and check for an SDA-to-GND short or a powered-down device holding SDA low.",
+    "fix_applies": "",
+    "fix_must_contain": [],
+    "fix_must_not_have": [],
+    "is_hardware_fault": true
+  },
+  "hallucinated": ["0x76", "0x68", "register"]
+}

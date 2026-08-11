@@ -1,0 +1,22 @@
+{
+  "id": "spi-not-enabled-overlay",
+  "archetype": "i2c-not-enabled",
+  "symptom": "spidev0.0 doesn't exist (/dev/spidev0.0: No such file). My MCP3008 ADC SPI code worked on the Pi 4 and fails on the fresh Pi 5 image.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "files": {
+      "config.txt": "# /boot/firmware/config.txt\nenable_uart=1\n"
+    },
+    "dmesg_tail": ["spi-bcm2835: could not find an available device"],
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "SPI is not enabled. Add dtparam=spi=on to /boot/firmware/config.txt and reboot; the spidev module then exposes /dev/spidev0.0 and /dev/spidev0.1.",
+    "fix_applies": "config.txt",
+    "fix_must_contain": ["dtparam=spi=on"],
+    "fix_must_not_have": ["dtparam=spi=off"],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["0x76", "0x68", "BME280"]
+}

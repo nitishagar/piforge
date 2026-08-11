@@ -1,0 +1,57 @@
+[
+  {
+    "tool_calls": [
+      {
+        "id": "i2c-1",
+        "type": "function",
+        "function": {
+          "name": "i2c",
+          "arguments": "{\"action\": \"scan\"}"
+        }
+      }
+    ],
+    "text": "",
+    "prompt_tokens": 120,
+    "completion": 50,
+    "cached": 0
+  },
+  {
+    "tool_calls": [
+      {
+        "id": "i2c-1",
+        "type": "function",
+        "function": {
+          "name": "i2c",
+          "arguments": "{\"action\": \"detect\", \"address\": 118}"
+        }
+      }
+    ],
+    "text": "",
+    "prompt_tokens": 200,
+    "completion": 50,
+    "cached": 180
+  },
+  {
+    "tool_calls": [
+      {
+        "id": "edit_file-1",
+        "type": "function",
+        "function": {
+          "name": "edit_file",
+          "arguments": "{\"path\": \"bme_simpletest.py\", \"content\": \"from board import *\\nfrom adafruit_bme280 import basic as adafruit_bme280\\ni2c = I2C(scl, sda)\\nbme = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)\\nprint(bme.humidity)\\n\"}"
+        }
+      }
+    ],
+    "text": "",
+    "prompt_tokens": 280,
+    "completion": 50,
+    "cached": 260
+  },
+  {
+    "tool_calls": [],
+    "text": "Fixed: the BME280 enumerates at 0x76 (118), not the driver default 0x77. Pass address=0x76 to the constructor.",
+    "prompt_tokens": 320,
+    "completion": 50,
+    "cached": 300
+  }
+]

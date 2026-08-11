@@ -1,0 +1,21 @@
+{
+  "id": "wrong-i2c-address-sht31-0x44",
+  "archetype": "wrong-i2c-address",
+  "symptom": "my SHT31 humidity sensor won't read. The Adafruit example just hangs.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": { "68": "SHT31" },
+    "files": {
+      "sht.py": "from board import *\nfrom adafruit_sht31d import SHT31D\ni2c = I2C(scl, sda)\ns = SHT31D(i2c)\nprint(s.relative_humidity)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "i2cdetect shows the device at 0x44 (68). The SHT31 has two addresses: 0x44 (ADDR pin low, the default) and 0x45 (ADDR pin high). The scan confirms 0x44, so pass address=0x44 explicitly so the driver targets it rather than relying on its probe.",
+    "fix_applies": "sht.py",
+    "fix_must_contain": ["address=0x44"],
+    "fix_must_not_have": ["0x45", "0x76", "0x68"],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["0x45", "0x76", "0x68"]
+}

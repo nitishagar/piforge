@@ -1,0 +1,21 @@
+{
+  "id": "wrong-i2c-address-scd30-0x61",
+  "archetype": "wrong-i2c-address",
+  "symptom": "my SCD30 CO2 sensor can't be opened. The SparkFun/Adafruit example constructs it with no address and it throws 'no device'.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": { "97": "SCD30" },
+    "files": {
+      "co2.py": "import board, busio\nfrom adafruit_scd30 import SCD30\ni2c = busio.I2C(board.SCL, board.SDA)\nsensor = SCD30(i2c)\nprint(sensor.co2)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "i2cdetect shows the SCD30 at 0x61 (97). The SCD30 has a fixed address of 0x61; the adafruit_scd30 driver also defaults to 0x61, but a constructor that omits the address and a stale bus lock from a previous run can both hide it. Pass address=0x61 explicitly.",
+    "fix_applies": "co2.py",
+    "fix_must_contain": ["address=0x61"],
+    "fix_must_not_have": ["0x68", "0x76", "0x77"],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["0x68", "0x76", "0x77"]
+}

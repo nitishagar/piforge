@@ -1,0 +1,22 @@
+{
+  "id": "gpio-pwm-pin-bcm12",
+  "archetype": "gpio-numbering",
+  "symptom": "I need hardware PWM for a dimmable LED. I set up PWM on BCM17 but the output is software-timed and jitters under load — not a clean hardware clock.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "gpio_pins": { "12": "output", "17": "output" },
+    "files": {
+      "fade.py": "import RPi.GPIO as GPIO\nGPIO.setmode(GPIO.BCM)\nGPIO.setup(17, GPIO.OUT)\npwm = GPIO.PWM(17, 1000)\npwm.start(50)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "On the Pi, hardware PWM (channel 0) is available only on BCM GPIO12/GPIO18 (the PCM_CLK/PWM0 pins), not BCM17. GPIO.PWM(17) is always software bit-banged. Move the LED to BCM12 and use a hardware-backed PWM source (gpiozero PWMLED on BCM12, which uses lgpio's hardware-timed PWM on Pi 5).",
+    "fix_applies": "fade.py",
+    "fix_must_contain": ["gpiozero", "PWMLED(12)"],
+    "fix_must_not_have": ["GPIO.PWM(17)", "RPi.GPIO"],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["BCM13", "GPIO19", "GPIO4"]
+}

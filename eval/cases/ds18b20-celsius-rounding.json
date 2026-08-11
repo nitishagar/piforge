@@ -1,0 +1,21 @@
+{
+  "id": "ds18b20-celsius-rounding",
+  "archetype": "unit-conversion",
+  "symptom": "my DS18B20 reports '25000 C' near room temperature. The raw w1_slave file shows t=25000. It should be ~25 C.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "files": {
+      "temp.py": "def parse_w1(line):\n    # line contains '... t=25000' (millidegrees Celsius)\n    return int(line.split('t=')[1])\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "The DS18B20 w1_slave 't=' value is in millidegrees Celsius. The code returns the raw integer (25000) as degrees. Divide by 1000 to get degrees Celsius (25.0).",
+    "fix_applies": "temp.py",
+    "fix_must_contain": ["/ 1000"],
+    "fix_must_not_have": [],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["0x76", "* 1000", "dtoverlay"]
+}

@@ -1,0 +1,21 @@
+{
+  "id": "adc-voltage-scale-ads1115",
+  "archetype": "unit-conversion",
+  "symptom": "my ADS1115 16-bit ADC code returns ~32768 for a mid-scale input on the 4.096V gain. The expected value is about 2.0 V, not 32768.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": { "72": "ADS1115" },
+    "files": {
+      "adc.py": "def to_volts(raw, gain_vref):\n    # raw is a signed 16-bit count (-32768..32767)\n    return raw\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "The ADS1115 is a 16-bit ADC: the conversion register is counts relative to full scale. Volts = raw * gain_vref / 32767 (where gain_vref is the programmed PGA, e.g. 4.096 V). The code returns the raw count instead of scaling. Multiply by the PGA reference and divide by 32767.",
+    "fix_applies": "adc.py",
+    "fix_must_contain": ["gain_vref", "/ 32767"],
+    "fix_must_not_have": [],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["0x76", "/ 1023", "/ 4095"]
+}

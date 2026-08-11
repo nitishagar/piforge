@@ -1,0 +1,24 @@
+{
+  "id": "undervoltage-throttled-bit0",
+  "archetype": "undervoltage-brownout",
+  "symptom": "vcgencmd get_throttled returns 0x1 and my Pi is unstable right now (USB devices drop). I thought bit 16 meant 'has occurred in the past', so why is it 0x1?",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "gpio_pins": { "17": "output" },
+    "dmesg_tail": [
+      "Under-voltage detected!",
+      "bcm2712 armctrl: throttled",
+      "dwc2: device disconnect"
+    ],
+    "throttled": "0x1"
+  },
+  "gold": {
+    "diagnosis": "get_throttled bit 0 is 'under-voltage NOW' (currently active), not bit 16 (which means 'has occurred since boot'). 0x1 means the supply is too low at this moment. This is a power-supply problem, not code. STOP coding; use a 5V/3A+ PSU and don't draw peripherals from the Pi rail.",
+    "fix_applies": "",
+    "fix_must_contain": [],
+    "fix_must_not_have": [],
+    "is_hardware_fault": true
+  },
+  "hallucinated": ["0x76", "register", "dtparam"]
+}

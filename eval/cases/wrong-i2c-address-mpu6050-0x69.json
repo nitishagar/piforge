@@ -1,0 +1,21 @@
+{
+  "id": "wrong-i2c-address-mpu6050-0x69",
+  "archetype": "wrong-i2c-address",
+  "symptom": "my MPU6050 accel/gyro reads nothing — the library says 'no device'. I checked the wiring.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": { "105": "MPU6050" },
+    "files": {
+      "mpu.py": "from board import *\nfrom adafruit_mpu6050 import MPU6050\ni2c = I2C(scl, sda)\nmpu = MPU6050(i2c)\nprint(mpu.acceleration)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "i2cdetect shows the device at 0x69 (105). The adafruit_mpu6050 driver defaults to 0x68, but this breakout has AD0 pulled high so the address is 0x69. Pass address=0x69.",
+    "fix_applies": "mpu.py",
+    "fix_must_contain": ["address=0x69"],
+    "fix_must_not_have": ["0x68", "0x76", "0x77"],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["0x68", "0x76", "0x77"]
+}

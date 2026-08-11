@@ -1,0 +1,21 @@
+{
+  "id": "wrong-i2c-address-pca9685-0x41",
+  "archetype": "wrong-i2c-address",
+  "symptom": "my PCA9685 PWM driver isn't driving my servos. The board has A0 soldered.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": { "65": "PCA9685" },
+    "files": {
+      "pwm.py": "from board import *\nfrom adafruit_pca9685 import PCA9685\ni2c = I2C(scl, sda)\np = PCA9685(i2c)\np.frequency = 50\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "i2cdetect shows the device at 0x41 (65). The PCA9685 base address is 0x40; with A0 soldered the address becomes 0x41. The adafruit_pca9685 driver defaults to 0x40. Pass address=0x41.",
+    "fix_applies": "pwm.py",
+    "fix_must_contain": ["address=0x41"],
+    "fix_must_not_have": ["0x40", "0x76", "0x77"],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["0x40", "0x76", "0x77"]
+}

@@ -1,0 +1,21 @@
+{
+  "id": "thermistor-steinhart-hart",
+  "archetype": "unit-conversion",
+  "symptom": "my NTC thermistor code prints ~10000.0 and calls it 'degrees'. Room temperature is about 25 C, so that's obviously a resistance, not a temperature.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "files": {
+      "therm.py": "import math\nR_REF = 10000.0\ndef to_celsius(adc_count, adc_max=1023):\n    # voltage divider with 10k reference; returns the thermistor resistance.\n    ratio = adc_count / (adc_max - adc_count)\n    return ratio * R_REF\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "The divider math correctly yields thermistor resistance (~10000 ohm at 25 C), but resistance is not temperature. Convert resistance to kelvin with the Steinhart-Hart equation (1/T = 1/T0 + (1/B)*ln(R/R0)) then subtract 273.15 for celsius. The code returns R as if it were degrees.",
+    "fix_applies": "therm.py",
+    "fix_must_contain": ["math.log", "1 / B", "- 273.15"],
+    "fix_must_not_have": [],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["0x76", "/ 1000"]
+}

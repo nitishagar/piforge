@@ -1,0 +1,25 @@
+[
+  {
+    "tool_calls": [
+      {
+        "id": "i2c-1",
+        "type": "function",
+        "function": {
+          "name": "i2c",
+          "arguments": "{\"action\": \"scan\"}"
+        }
+      }
+    ],
+    "text": "",
+    "prompt_tokens": 120,
+    "completion": 50,
+    "cached": 100
+  },
+  {
+    "tool_calls": [],
+    "text": "i2cdetect shows every address responding \u2014 that means SDA/SCL are shorted to power. This is a hardware/wiring fault. STOP coding; check the wiring and pull-ups before any further I2C op.",
+    "prompt_tokens": 200,
+    "completion": 50,
+    "cached": 180
+  }
+]

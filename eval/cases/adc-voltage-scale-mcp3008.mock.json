@@ -1,0 +1,41 @@
+[
+  {
+    "tool_calls": [
+      {
+        "id": "hardware_inventory-1",
+        "type": "function",
+        "function": {
+          "name": "hardware_inventory",
+          "arguments": "{}"
+        }
+      }
+    ],
+    "text": "",
+    "prompt_tokens": 120,
+    "completion": 50,
+    "cached": 0
+  },
+  {
+    "tool_calls": [
+      {
+        "id": "edit_file-1",
+        "type": "function",
+        "function": {
+          "name": "edit_file",
+          "arguments": "{\"path\": \"adc.py\", \"content\": \"def to_volts(raw, vref):\\n    # raw is a 10-bit count (0..1023). Volts = raw * vref / 1023.\\n    return raw * vref / 1023\\n\"}"
+        }
+      }
+    ],
+    "text": "",
+    "prompt_tokens": 280,
+    "completion": 50,
+    "cached": 260
+  },
+  {
+    "tool_calls": [],
+    "text": "Fixed: the MCP3008 is a 10-bit ADC (0..1023 counts). Convert counts to volts with raw * vref / 1023.",
+    "prompt_tokens": 320,
+    "completion": 50,
+    "cached": 300
+  }
+]

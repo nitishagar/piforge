@@ -1,0 +1,25 @@
+[
+  {
+    "tool_calls": [
+      {
+        "id": "telemetry-1",
+        "type": "function",
+        "function": {
+          "name": "telemetry",
+          "arguments": "{\"action\": \"snapshot\"}"
+        }
+      }
+    ],
+    "text": "",
+    "prompt_tokens": 130,
+    "completion": 50,
+    "cached": 0
+  },
+  {
+    "tool_calls": [],
+    "text": "The motor driver's inrush current is pulling the 5V rail down and tripping the polyfuse, which resets the board each time the motor is enabled. This is a physical fault in the power wiring, not a code bug: power the motor from a separate supply, never the Pi 5V pin. STOP coding and rewire the power.",
+    "prompt_tokens": 210,
+    "completion": 50,
+    "cached": 190
+  }
+]

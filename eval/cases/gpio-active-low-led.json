@@ -1,0 +1,22 @@
+{
+  "id": "gpio-active-low-led",
+  "archetype": "gpio-numbering",
+  "symptom": "my LED is wired between 3.3V and the GPIO pin (active-low). The code sets the pin HIGH to turn it on, but the LED stays off and lights when I set it LOW. The pin number is correct (BCM17).",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "gpio_pins": { "17": "output" },
+    "files": {
+      "led.py": "from gpiozero import LED\nfrom time import sleep\nled = LED(17)\nwhile True:\n    led.on()\n    sleep(0.5)\n    led.off()\n    sleep(0.5)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "The LED is wired active-low (anode to 3.3V, cathode to the GPIO pin through a resistor). A plain gpiozero LED drives active-high, so on() drives the pin HIGH and the LED is off. Use LED(17, active_high=False) so on() drives the pin LOW and the LED lights.",
+    "fix_applies": "led.py",
+    "fix_must_contain": ["active_high=False"],
+    "fix_must_not_have": ["LED(11)", "LED(18)"],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["LED(18)", "GPIO27", "BCM18"]
+}

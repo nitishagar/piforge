@@ -1,0 +1,57 @@
+[
+  {
+    "tool_calls": [
+      {
+        "id": "i2c-1",
+        "type": "function",
+        "function": {
+          "name": "i2c",
+          "arguments": "{\"action\": \"scan\"}"
+        }
+      }
+    ],
+    "text": "",
+    "prompt_tokens": 120,
+    "completion": 50,
+    "cached": 0
+  },
+  {
+    "tool_calls": [
+      {
+        "id": "i2c-1",
+        "type": "function",
+        "function": {
+          "name": "i2c",
+          "arguments": "{\"action\": \"detect\", \"address\": 72}"
+        }
+      }
+    ],
+    "text": "",
+    "prompt_tokens": 200,
+    "completion": 50,
+    "cached": 180
+  },
+  {
+    "tool_calls": [
+      {
+        "id": "edit_file-1",
+        "type": "function",
+        "function": {
+          "name": "edit_file",
+          "arguments": "{\"path\": \"adc.py\", \"content\": \"def to_volts(raw, gain_vref):\\n    # raw is a signed 16-bit count (-32768..32767). Volts = raw * gain_vref / 32767\\n    (gain_vref is the programmed PGA, e.g. 4.096 V).\\n    return raw * gain_vref / 32767\\n\"}"
+        }
+      }
+    ],
+    "text": "",
+    "prompt_tokens": 280,
+    "completion": 50,
+    "cached": 260
+  },
+  {
+    "tool_calls": [],
+    "text": "Fixed: the ADS1115 is a 16-bit ADC. Convert the signed count to volts with raw * gain_vref / 32767 (gain_vref is the programmed PGA reference, e.g. 4.096 V).",
+    "prompt_tokens": 320,
+    "completion": 50,
+    "cached": 300
+  }
+]

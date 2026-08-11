@@ -1,0 +1,22 @@
+{
+  "id": "pi5-gpio-character-device",
+  "archetype": "pi5-lgpio-migration",
+  "symptom": "my hand-rolled GPIO driver maps /dev/mem and pokes the BCM2835 GPIO registers directly. On the Pi 5 it reads back zeros and pins never toggle. It worked on the Pi 4.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "gpio_pins": { "17": "output" },
+    "files": {
+      "mmio.py": "import mmap, os\n# Map the BCM2835 GPIO registers via /dev/mem and set bit 17.\nfd = os.open('/dev/mem', os.O_RDWR)\nbase = 0x3F200000\nm = mmap.mmap(fd, 4096, offset=base)\nm[0x1C] = 1 << 17   # GPSET0\nos.close(fd)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "On the Pi 5 the GPIO controller is on the RP1 southbridge, not at the legacy BCM2835 0x3F200000 mmio base, so /dev/mem pokes silently miss. The correct abstraction is the Linux GPIO character device (/dev/gpiochip4) via libgpiod (the gpiod Python bindings). Rewrite to drive the line through a libgpiod LineRequest.",
+    "fix_applies": "mmio.py",
+    "fix_must_contain": ["gpiod", "/dev/gpiochip"],
+    "fix_must_not_have": ["/dev/mem", "0x3F200000"],
+    "is_hardware_fault": false
+  },
+  "hallucinated": ["pigpio", "WiringPi"]
+}

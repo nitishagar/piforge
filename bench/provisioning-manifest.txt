@@ -1,0 +1,28 @@
+# Provisioning Manifest — Blocker 3 hallpi (ssnk@hallpi)
+#
+# Records every artifact this plan installs on the Pi, and the rollback step
+# for each. Phase 6 executes the "Rollback" column. Baseline captured BEFORE
+# any install so cleanup can verify return-to-baseline.
+#
+# Host: Raspberry Pi 5 Model B Rev 1.0, 8GB RAM, 850GB NVMe free.
+
+## BASELINE (captured before provisioning)
+# OS:       Linux hallpi 6.12.34+rpt-rpi-2712 aarch64 (Debian bookworm)
+# Mem:      7.9Gi total, 2.2Gi used, 5.7Gi available
+# Disk:     /dev/nvme0n1p2  918G  21G used  850G free (3%)
+# Toolchain PRESENT:  git 2.39.5, cmake, gcc/g++, make
+# Toolchain ABSENT:   rust/cargo, cactus, brew
+# Repo:     no piforge clone
+
+## ARTIFACTS INSTALLED (append as each lands)
+1. Rust toolchain (~/.cargo, ~/.rustup)        Rollback: rm -rf ~/.cargo ~/.rustup
+   - cargo 1.97.1, rustc 1.97.1
+2. piforge clone (~/.piforge, blocker-3 branch) Rollback: rm -rf ~/piforge
+   - commit 7a76ed1; rust/target/ build artifacts
+3. Python 3.12.7 built from source              Rollback: sudo rm -f /usr/local/bin/python3.12*
+   - installed to /usr/local (system python3 3.11 UNCHANGED)   and /usr/local/lib/python3.12, /usr/local/include/python3.12
+   - source tree ~/Python-3.12.7 + ~/Python-3.12.7.tgz  (rm -rf ~/Python-3.12.7*)
+4. cactus engine (~/.cactus)                    Rollback: rm -rf ~/cactus
+   - cloned from github.com/cactus-compute/cactus
+   - venv at ~/cactus/venv; cactus CLI on PATH when venv active
+   - cactus serve / run / download / convert / clean all present

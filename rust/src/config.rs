@@ -58,6 +58,12 @@ impl Default for ModelConfig {
 pub struct ServerConfig {
     pub base_url: String,
     pub api_key: String,
+    /// Model name sent in the `model` field of chat-completion requests.
+    /// llama-server ignores this (it uses its loaded GGUF), but other
+    /// OpenAI-compat servers (e.g. `cactus serve`) VALIDATE the model name
+    /// against what they serve and reject unknown names. Set this to the
+    /// served model id when pointing at a server that validates.
+    pub model: String,
     pub max_tokens: u32,
     pub temperature: f32,
 }
@@ -67,6 +73,7 @@ impl Default for ServerConfig {
         Self {
             base_url: "http://127.0.0.1:8080/v1".into(),
             api_key: "dummy".into(),
+            model: "piforge".into(),
             max_tokens: 1024,
             temperature: 0.2,
         }

@@ -15,6 +15,9 @@ pub struct Client {
     http: HttpClient,
     base_url: String,
     api_key: String,
+    /// Model name sent in each request. Defaults to "piforge" (ignored by
+    /// llama-server); set to the served model id for servers that validate.
+    model: String,
     max_tokens: u32,
     temperature: f32,
     metrics: parking_lot::Mutex<Metrics>,
@@ -37,6 +40,7 @@ impl Client {
             http,
             base_url: cfg.base_url.trim_end_matches('/').to_string(),
             api_key: cfg.api_key.clone(),
+            model: cfg.model.clone(),
             max_tokens: cfg.max_tokens,
             temperature: cfg.temperature,
             metrics: parking_lot::Mutex::new(Metrics::default()),
@@ -60,8 +64,10 @@ impl Client {
     /// Non-streaming chat completion. Returns content + tool calls + telemetry.
     pub async fn chat(&self, req: &ChatRequest) -> Result<ChatResponse> {
         let body = ChatCompletionRequest {
-            // llama-server ignores model; uses its loaded GGUF.
-            model: "piforge".into(),
+            // Servers that validate (cactus serve) reject unknown names;
+            // llama-server ignores this field. cfg.model lets the caller set
+            // the served model id for validating servers.
+            model: self.model.clone(),
             messages: req.messages.clone(),
             tools: if req.tools.is_empty() {
                 None

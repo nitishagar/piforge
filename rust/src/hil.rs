@@ -47,13 +47,34 @@ pub struct ToolResult {
 
 impl ToolResult {
     pub fn ok(tool: &str, value: Value) -> Self {
-        Self { tool: tool.into(), ok: true, value: Some(value), unit: None, error: None, notice: None }
+        Self {
+            tool: tool.into(),
+            ok: true,
+            value: Some(value),
+            unit: None,
+            error: None,
+            notice: None,
+        }
     }
     pub fn ok_unit(tool: &str, value: Value, unit: &str) -> Self {
-        Self { tool: tool.into(), ok: true, value: Some(value), unit: Some(unit.into()), error: None, notice: None }
+        Self {
+            tool: tool.into(),
+            ok: true,
+            value: Some(value),
+            unit: Some(unit.into()),
+            error: None,
+            notice: None,
+        }
     }
     pub fn err(tool: &str, msg: impl Into<String>) -> Self {
-        Self { tool: tool.into(), ok: false, value: None, unit: None, error: Some(msg.into()), notice: None }
+        Self {
+            tool: tool.into(),
+            ok: false,
+            value: None,
+            unit: None,
+            error: Some(msg.into()),
+            notice: None,
+        }
     }
     pub fn to_json_string(&self) -> String {
         serde_json::to_string(self).unwrap_or_else(|_| "{\"ok\":false}".into())

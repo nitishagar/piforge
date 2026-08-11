@@ -38,7 +38,12 @@ impl Broker {
         tel: Option<Arc<dyn ThrottledReader>>,
         confirm: Arc<dyn Fn(&str) -> bool + Send + Sync>,
     ) -> Self {
-        Self { cfg, tel, confirm, armed: Mutex::new(HashMap::new()) }
+        Self {
+            cfg,
+            tel,
+            confirm,
+            armed: Mutex::new(HashMap::new()),
+        }
     }
 
     /// Convenience: always-deny confirmer (for eval/unattended runs).

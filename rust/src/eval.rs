@@ -68,16 +68,29 @@ pub struct Runner {
 
 impl Runner {
     pub fn new(client: std::sync::Arc<dyn LlmClient>, max_turns: u32) -> Self {
-        Self { client: Some(client), mock: None, max_turns }
+        Self {
+            client: Some(client),
+            mock: None,
+            max_turns,
+        }
     }
     pub fn new_mock(max_turns: u32) -> (Self, std::sync::Arc<MockProvider>) {
         let mock = std::sync::Arc::new(MockProvider::new());
-        (Self { client: None, mock: Some(mock.clone()), max_turns }, mock)
+        (
+            Self {
+                client: None,
+                mock: Some(mock.clone()),
+                max_turns,
+            },
+            mock,
+        )
     }
 
     /// Run all *.json cases in `cases_dir`, invoking `progress` per verdict.
     pub async fn run_all<F>(&self, cases_dir: &str, mut progress: F) -> Result<Vec<Verdict>>
-    where F: FnMut(&Verdict) {
+    where
+        F: FnMut(&Verdict),
+    {
         let mut entries: Vec<_> = std::fs::read_dir(cases_dir)
             .map_err(|e| anyhow!("read cases dir {cases_dir}: {e}"))?
             .filter_map(|e| e.ok())
@@ -87,9 +100,11 @@ impl Runner {
         let mut verdicts = vec![];
         for e in entries {
             let path = e.path();
-            let case: Case = serde_json::from_str(&std::fs::read_to_string(&path)
-                .map_err(|err| anyhow!("read {}: {err}", path.display()))?)
-                .map_err(|err| anyhow!("parse {}: {err}", path.display()))?;
+            let case: Case = serde_json::from_str(
+                &std::fs::read_to_string(&path)
+                    .map_err(|err| anyhow!("read {}: {err}", path.display()))?,
+            )
+            .map_err(|err| anyhow!("parse {}: {err}", path.display()))?;
             let v = self.run_case(&case).await;
             progress(&v);
             verdicts.push(v);
@@ -99,12 +114,18 @@ impl Runner {
 
     async fn run_case(&self, c: &Case) -> Verdict {
         let start = std::time::Instant::now();
-        let mut v = Verdict { case_id: c.id.clone(), ..Default::default() };
+        let mut v = Verdict {
+            case_id: c.id.clone(),
+            ..Default::default()
+        };
 
         // Per-case temp workspace seeded with the fixture's files.
         let workspace = match temp_workspace(&c.setup.files) {
             Ok(w) => w,
-            Err(e) => { v.notes = format!("error: {e}"); return v; }
+            Err(e) => {
+                v.notes = format!("error: {e}");
+                return v;
+            }
         };
 
         // Sim state + tools.
@@ -114,7 +135,8 @@ impl Runner {
             crate::config::SafetyConfig {
                 arm_mode: "auto".into(), // eval/batch; main validates the env guard
                 stop_on_under_voltage: true,
-                per_pin_max_current_ma: 12, rail_budget_ma: 50,
+                per_pin_max_current_ma: 12,
+                rail_budget_ma: 50,
             },
             Some(st_reader),
             Broker::always_deny(),
@@ -137,14 +159,23 @@ impl Runner {
             None => {
                 let mock = self.mock.clone().unwrap();
                 mock.load(script(&c.id)).await;
-                let agent = Agent::new(mock as std::sync::Arc<dyn LlmClient>, tools, self.max_turns);
+                let agent =
+                    Agent::new(mock as std::sync::Arc<dyn LlmClient>, tools, self.max_turns);
                 agent.run(&c.symptom, |_| ()).await
             }
         };
         v.duration_sec = start.elapsed().as_secs_f64();
         let (final_text, turns, cache_rate, edit_count) = match res {
-            Ok(r) => (r.final_text.clone(), r.turns, r.cache_hit_rate(), edit_tool.edits()),
-            Err(e) => { v.notes = format!("error: {e}"); return v; }
+            Ok(r) => (
+                r.final_text.clone(),
+                r.turns,
+                r.cache_hit_rate(),
+                edit_tool.edits(),
+            ),
+            Err(e) => {
+                v.notes = format!("error: {e}");
+                return v;
+            }
         };
         v.turns = turns;
         v.cache_hit_rate = cache_rate;
@@ -152,7 +183,10 @@ impl Runner {
 
         // Score.
         let lower = final_text.to_lowercase();
-        v.hallucination = c.hallucinated.iter().any(|h| lower.contains(&h.to_lowercase()));
+        v.hallucination = c
+            .hallucinated
+            .iter()
+            .any(|h| lower.contains(&h.to_lowercase()));
 
         if !c.gold.fix_applies.is_empty() && !c.gold.fix_must_contain.is_empty() {
             let path = std::path::Path::new(&workspace).join(&c.gold.fix_applies);
@@ -186,7 +220,9 @@ pub struct Summary {
 
 pub fn summarize(vs: &[Verdict]) -> Summary {
     let total = vs.len();
-    if total == 0 { return Summary::default(); }
+    if total == 0 {
+        return Summary::default();
+    }
     let passed = vs.iter().filter(|v| v.pass_).count();
     let partial = vs.iter().filter(|v| v.partial).count();
     let hallucinated = vs.iter().filter(|v| v.hallucination).count();
@@ -195,7 +231,10 @@ pub fn summarize(vs: &[Verdict]) -> Summary {
     turns.sort_unstable();
     let median = turns[turns.len() / 2];
     Summary {
-        total, passed, partial, hallucinated,
+        total,
+        passed,
+        partial,
+        hallucinated,
         pass_rate: passed as f64 / total as f64,
         hallucination_rate: hallucinated as f64 / total as f64,
         median_turns: median,
@@ -218,10 +257,23 @@ pub fn decide(s: &Summary, pass_thresh: f64, halluc_thresh: f64) -> &'static str
 /// against "default" matching "fault", "powered" matching "power".
 fn contains_diagnosis(lower: &str) -> bool {
     const PHRASES: &[&str] = &[
-        "hardware fault", "hardware issue", "wiring", "power supply", "psu",
-        "brownout", "under-voltage", "undervoltage", "short circuit", "shorted",
-        "stop coding", "physical fault", "not a software", "not a code",
-        "rewire", "pull-up", "pull up resistor",
+        "hardware fault",
+        "hardware issue",
+        "wiring",
+        "power supply",
+        "psu",
+        "brownout",
+        "under-voltage",
+        "undervoltage",
+        "short circuit",
+        "shorted",
+        "stop coding",
+        "physical fault",
+        "not a software",
+        "not a code",
+        "rewire",
+        "pull-up",
+        "pull up resistor",
     ];
     PHRASES.iter().any(|p| lower.contains(p))
 }
@@ -232,14 +284,22 @@ fn temp_workspace(files: &std::collections::HashMap<String, String>) -> Result<S
     std::fs::create_dir_all(&dir)?;
     for (rel, content) in files {
         let abs = dir.join(rel);
-        if let Some(parent) = abs.parent() { std::fs::create_dir_all(parent)?; }
+        if let Some(parent) = abs.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
         std::fs::write(&abs, content)?;
     }
     Ok(dir.to_string_lossy().into_owned())
 }
 
 fn truncate(s: &str, n: usize) -> String {
-    if s.chars().count() <= n { s.into() } else { let mut t: String = s.chars().take(n).collect(); t.push_str("..."); t }
+    if s.chars().count() <= n {
+        s.into()
+    } else {
+        let mut t: String = s.chars().take(n).collect();
+        t.push_str("...");
+        t
+    }
 }
 
 /// Scripted mock turns for the seed cases (matches the Go eval). Returns an
@@ -266,13 +326,30 @@ fn script(case_id: &str) -> Vec<MockTurn> {
 
 fn mturn_call(name: &str, args: &str, prompt: u64, cached: u64) -> MockTurn {
     MockTurn {
-        tool_calls: vec![ToolCall { id: format!("{name}-1"), kind: "function".into(), function: crate::provider::ToolCallFunction { name: name.into(), arguments: args.into() } }],
-        text: String::new(), prompt_tokens: prompt, completion: 50, cached,
+        tool_calls: vec![ToolCall {
+            id: format!("{name}-1"),
+            kind: "function".into(),
+            function: crate::provider::ToolCallFunction {
+                name: name.into(),
+                arguments: args.into(),
+            },
+        }],
+        text: String::new(),
+        prompt_tokens: prompt,
+        completion: 50,
+        cached,
     }
 }
 fn mturn_text(text: &str, prompt: u64, cached: u64) -> MockTurn {
-    MockTurn { tool_calls: vec![], text: text.into(), prompt_tokens: prompt, completion: 50, cached }
+    MockTurn {
+        tool_calls: vec![],
+        text: text.into(),
+        prompt_tokens: prompt,
+        completion: 50,
+        cached,
+    }
 }
 
 // keep the unused-config import warning quiet when only mock mode is exercised
-#[allow(dead_code)] fn _unused(_c: &Config, _e: &EvalConfig) {}
+#[allow(dead_code)]
+fn _unused(_c: &Config, _e: &EvalConfig) {}

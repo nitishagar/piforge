@@ -156,8 +156,7 @@ impl Default for EvalConfig {
 pub fn load(path: &str) -> Result<Config> {
     let mut cfg = Config::default();
     if !path.is_empty() && path != "none" {
-        let text = std::fs::read_to_string(path)
-            .map_err(|e| anyhow!("read {path}: {e}"))?;
+        let text = std::fs::read_to_string(path).map_err(|e| anyhow!("read {path}: {e}"))?;
         cfg = toml::from_str(&text).map_err(|e| anyhow!("decode {path}: {e}"))?;
     }
     apply_env(&mut cfg);

@@ -63,14 +63,19 @@ impl Client {
             // llama-server ignores model; uses its loaded GGUF.
             model: "piforge".into(),
             messages: req.messages.clone(),
-            tools: if req.tools.is_empty() { None } else { Some(req.tools.clone()) },
+            tools: if req.tools.is_empty() {
+                None
+            } else {
+                Some(req.tools.clone())
+            },
             tool_choice: req.tool_choice.clone(),
             max_tokens: req.max_tokens.unwrap_or(self.max_tokens),
             temperature: self.temperature,
             stream: false,
         };
         let url = format!("{}/chat/completions", self.base_url);
-        let resp = self.http
+        let resp = self
+            .http
             .post(&url)
             .bearer_auth(&self.api_key)
             .json(&body)
@@ -90,7 +95,11 @@ impl Client {
             finish_reason: choice.finish_reason.clone().unwrap_or_default(),
             prompt_tokens: cc.usage.prompt_tokens,
             completion: cc.usage.completion_tokens,
-            cached: cc.usage.prompt_tokens_details.as_ref().map_or(0, |d| d.cached_tokens),
+            cached: cc
+                .usage
+                .prompt_tokens_details
+                .as_ref()
+                .map_or(0, |d| d.cached_tokens),
         };
         {
             let mut m = self.metrics.lock();

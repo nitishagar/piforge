@@ -63,7 +63,11 @@ pub struct RunResult {
 impl RunResult {
     /// Fraction of prompt tokens served from the KV cache (1.0 = perfect reuse).
     pub fn cache_hit_rate(&self) -> f64 {
-        if self.prompt_tokens == 0 { 0.0 } else { self.cached as f64 / self.prompt_tokens as f64 }
+        if self.prompt_tokens == 0 {
+            0.0
+        } else {
+            self.cached as f64 / self.prompt_tokens as f64
+        }
     }
 }
 
@@ -76,16 +80,32 @@ pub struct Agent {
 
 impl Agent {
     pub fn new(client: Arc<dyn LlmClient>, tools: ToolVec, max_turns: u32) -> Self {
-        Self { client, tools, max_turns: if max_turns == 0 { 12 } else { max_turns } }
+        Self {
+            client,
+            tools,
+            max_turns: if max_turns == 0 { 12 } else { max_turns },
+        }
     }
 
     /// Run one task. `user_msg` is the user's symptom. `on_text` (optional)
     /// receives assistant text as it finalizes per turn.
     pub async fn run<F>(&self, user_msg: &str, mut on_text: F) -> Result<RunResult>
-    where F: FnMut(&str) {
+    where
+        F: FnMut(&str),
+    {
         let mut msgs = vec![
-            ChatMessage { role: "system".into(), content: Some(SYSTEM_PROMPT.into()), tool_calls: None, tool_call_id: None },
-            ChatMessage { role: "user".into(), content: Some(user_msg.into()), tool_calls: None, tool_call_id: None },
+            ChatMessage {
+                role: "system".into(),
+                content: Some(SYSTEM_PROMPT.into()),
+                tool_calls: None,
+                tool_call_id: None,
+            },
+            ChatMessage {
+                role: "user".into(),
+                content: Some(user_msg.into()),
+                tool_calls: None,
+                tool_call_id: None,
+            },
         ];
         let tool_defs: Vec<ProvTool> = self.tools.iter().map(|t| t.schema()).collect();
 
@@ -100,26 +120,41 @@ impl Agent {
                 tool_choice: Some(json!("auto")),
                 max_tokens: None,
             };
-            let resp: ChatResponse = self.client.chat(&req).await
+            let resp: ChatResponse = self
+                .client
+                .chat(&req)
+                .await
                 .map_err(|e| anyhow!("turn {turn}: {e}"))?;
             acc_prompt += resp.prompt_tokens;
             acc_completion += resp.completion;
             acc_cached += resp.cached;
 
             if resp.tool_calls.is_empty() {
-                if !resp.content.is_empty() { on_text(&resp.content); }
+                if !resp.content.is_empty() {
+                    on_text(&resp.content);
+                }
                 return Ok(RunResult {
-                    final_text: resp.content, turns: turn + 1,
-                    prompt_tokens: acc_prompt, completion: acc_completion, cached: acc_cached,
+                    final_text: resp.content,
+                    turns: turn + 1,
+                    prompt_tokens: acc_prompt,
+                    completion: acc_completion,
+                    cached: acc_cached,
                 });
             }
 
-            if !resp.content.is_empty() { on_text(&resp.content); on_text("\n"); }
+            if !resp.content.is_empty() {
+                on_text(&resp.content);
+                on_text("\n");
+            }
 
             // Append the assistant message carrying the tool calls.
             msgs.push(ChatMessage {
                 role: "assistant".into(),
-                content: if resp.content.is_empty() { None } else { Some(resp.content) },
+                content: if resp.content.is_empty() {
+                    None
+                } else {
+                    Some(resp.content)
+                },
                 tool_calls: Some(resp.tool_calls.clone()),
                 tool_call_id: None,
             });
@@ -146,7 +181,10 @@ impl Agent {
                 return res.to_json_string();
             }
         }
-        format!("{{\"tool\":\"{}\",\"ok\":false,\"error\":\"unknown tool\"}}", call.function.name)
+        format!(
+            "{{\"tool\":\"{}\",\"ok\":false,\"error\":\"unknown tool\"}}",
+            call.function.name
+        )
     }
 }
 
@@ -154,7 +192,10 @@ impl Agent {
 pub struct MockProvider {
     inner: Mutex<MockInner>,
 }
-struct MockInner { turns: Vec<MockTurn>, pos: usize }
+struct MockInner {
+    turns: Vec<MockTurn>,
+    pos: usize,
+}
 /// One scripted assistant turn (either tool_calls or text).
 #[derive(Clone)]
 pub struct MockTurn {
@@ -166,10 +207,18 @@ pub struct MockTurn {
 }
 
 impl MockProvider {
-    pub fn new() -> Self { Self { inner: Mutex::new(MockInner { turns: vec![], pos: 0 }) } }
+    pub fn new() -> Self {
+        Self {
+            inner: Mutex::new(MockInner {
+                turns: vec![],
+                pos: 0,
+            }),
+        }
+    }
     pub async fn load(&self, turns: Vec<MockTurn>) {
         let mut g = self.inner.lock().await;
-        g.turns = turns; g.pos = 0;
+        g.turns = turns;
+        g.pos = 0;
     }
 }
 
@@ -182,9 +231,19 @@ impl LlmClient for MockProvider {
             g.pos += 1;
             t
         } else {
-            MockTurn { tool_calls: vec![], text: String::new(), prompt_tokens: 100, completion: 0, cached: 0 }
+            MockTurn {
+                tool_calls: vec![],
+                text: String::new(),
+                prompt_tokens: 100,
+                completion: 0,
+                cached: 0,
+            }
         };
-        let finish = if turn.tool_calls.is_empty() { "stop" } else { "tool_calls" };
+        let finish = if turn.tool_calls.is_empty() {
+            "stop"
+        } else {
+            "tool_calls"
+        };
         drop(g);
         Ok(ChatResponse {
             content: turn.text,

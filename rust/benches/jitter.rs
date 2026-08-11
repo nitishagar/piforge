@@ -52,13 +52,22 @@ fn measure_jitter(dur: Duration, cadence: Duration) -> JitterStats {
     }
 }
 
-struct JitterStats { n: usize, p50: i64, p99: i64, max: i64, expected: i64 }
+struct JitterStats {
+    n: usize,
+    p50: i64,
+    p99: i64,
+    max: i64,
+    expected: i64,
+}
 
 impl std::fmt::Display for JitterStats {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let overrun = self.p99 as f64 / self.expected as f64;
-        write!(f, "n={} delta_us p50={} p99={} max={} (expected={}, p99_overrun={:.1}x)",
-            self.n, self.p50, self.p99, self.max, self.expected, overrun)
+        write!(
+            f,
+            "n={} delta_us p50={} p99={} max={} (expected={}, p99_overrun={:.1}x)",
+            self.n, self.p50, self.p99, self.max, self.expected, overrun
+        )
     }
 }
 

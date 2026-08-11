@@ -6,7 +6,10 @@ use clap::Parser;
 use piforge::{agent::Agent, broker::Broker, config, hil::ToolVec, provider::Client, sim};
 
 #[derive(Parser)]
-#[command(name = "piforge", about = "The agent that understands live hardware state")]
+#[command(
+    name = "piforge",
+    about = "The agent that understands live hardware state"
+)]
 struct Args {
     /// Path to piforge.toml ("" or "none" for defaults).
     #[arg(long, default_value = "piforge.toml")]
@@ -29,7 +32,11 @@ async fn main() -> Result<()> {
     // on Linux. In this dev build they fall back to sim-backed stubs so the
     // loop runs; on the Pi, build with `--features hw`.
     let st = sim::State::from_setup(sim::Setup::default());
-    let gate = Arc::new(Broker::new(cfg.safety.clone(), Some(st.clone()), Broker::always_deny()));
+    let gate = Arc::new(Broker::new(
+        cfg.safety.clone(),
+        Some(st.clone()),
+        Broker::always_deny(),
+    ));
     let tools: ToolVec = vec![
         sim::InventoryTool::new(st.clone()),
         sim::TelemetryTool::new(st.clone()),
@@ -45,7 +52,12 @@ async fn main() -> Result<()> {
         None => anyhow::bail!("no --task given; interactive mode not yet implemented"),
     };
     let res = agent.run(&task, |s| println!("{s}")).await?;
-    eprintln!("\n[turns={} cache_hit={:.0}% prompt_tok={} completion_tok={}]",
-        res.turns, res.cache_hit_rate() * 100.0, res.prompt_tokens, res.completion);
+    eprintln!(
+        "\n[turns={} cache_hit={:.0}% prompt_tok={} completion_tok={}]",
+        res.turns,
+        res.cache_hit_rate() * 100.0,
+        res.prompt_tokens,
+        res.completion
+    );
     Ok(())
 }

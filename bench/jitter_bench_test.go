@@ -1,13 +1,19 @@
 // Scope-jitter micro-benchmark. This is the moat metric: the worst-case
-// inter-sample latency on the edge-event handler loop. GC pauses (Go) are the
-// suspected enemy; Rust (no GC) should produce a tighter tail.
+// inter-sample latency on the edge-event handler loop.
 //
-// Run: go test -bench=. -benchtime=5s ./bench/
+// Two variants, for an honest Go-vs-Rust comparison:
+//   - BenchmarkScopeJitterForcedGC: forces runtime.GC() every 50 samples
+//     (adversarial conditioning to surface GC pause cost). This was the
+//     original baseline and OVERSTATES Go's real-world jitter.
+//   - BenchmarkScopeJitterDemandGC: the honest, non-adversarial variant. No
+//     forced GC; the runtime collects on demand as it would in the real agent
+//     loop. Same 1KB allocation every 50 samples to keep the allocator hot
+//     and produce realistic GC pressure.
 //
-// The bench spins a goroutine that "fires edges" at a fixed cadence; the
-// handler records arrival times and reports p50/p99/max jitter vs the cadence.
-// On darwin (no real hardware) it still exercises the runtime's scheduling +
-// GC behavior, which is what we're measuring.
+// Run: go test -bench=. -benchtime=10x ./bench/
+//
+// The bench spins a goroutine that fires edges at a fixed cadence; the handler
+// records arrival times and reports p50/p99/max jitter vs the cadence.
 package bench
 
 import (
@@ -17,17 +23,27 @@ import (
 	"time"
 )
 
-// BenchmarkScopeJitter measures the tail latency of an edge-event handler
-// loop over a 2-second capture window with 1ms cadence (1000 edges).
-func BenchmarkScopeJitter(b *testing.B) {
+// BenchmarkScopeJitterForcedGC is the ADVERSARIAL variant (forces GC). Kept
+// for reference; prefer DemandGC for an honest comparison.
+func BenchmarkScopeJitterForcedGC(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		measureJitter(b, 2*time.Second, time.Millisecond)
+		measureJitter(b, 2*time.Second, time.Millisecond, true)
+	}
+}
+
+// BenchmarkScopeJitterDemandGC is the HONEST variant: no forced GC. The
+// runtime collects on demand, as it would in the real agent loop.
+func BenchmarkScopeJitterDemandGC(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		measureJitter(b, 2*time.Second, time.Millisecond, false)
 	}
 }
 
 // measureJitter fires edges at the given cadence for dur, recording the
-// arrival-time delta vs the expected cadence. Reports p50/p99/max.
-func measureJitter(b *testing.B, dur, cadence time.Duration) {
+// arrival-time delta vs the expected cadence. When forceGC is true, a GC is
+// forced every 50 samples (adversarial); otherwise allocation happens but GC
+// runs only on demand (the realistic Go agent-loop behavior).
+func measureJitter(b *testing.B, dur, cadence time.Duration, forceGC bool) {
 	const expected = 1000 // 1ms in microseconds
 	n := int(dur / cadence)
 	deltas := make([]int, 0, n)
@@ -42,7 +58,7 @@ func measureJitter(b *testing.B, dur, cadence time.Duration) {
 		close(arrivals)
 	}()
 
-	// Handler: records arrival, forces GC periodically to surface pauses.
+	// Handler: records arrival; allocates to keep the allocator hot.
 	prev := time.Now()
 	i := 0
 	for a := range arrivals {
@@ -52,10 +68,13 @@ func measureJitter(b *testing.B, dur, cadence time.Duration) {
 		}
 		prev = a
 		i++
-		// Force a GC every 50 samples to surface pause impact (the Rust impl
-		// has no GC; this isolates Go's cost).
+		// Same 1KB allocation every 50 samples as the Rust bench, to keep the
+		// allocator hot and produce realistic GC pressure.
 		if i%50 == 0 {
-			runtime.GC()
+			_ = make([]byte, 1024)
+			if forceGC {
+				runtime.GC()
+			}
 		}
 	}
 
@@ -63,6 +82,10 @@ func measureJitter(b *testing.B, dur, cadence time.Duration) {
 	p50 := deltas[len(deltas)/2]
 	p99 := deltas[len(deltas)*99/100]
 	maxD := deltas[len(deltas)-1]
-	b.Logf("n=%d cadence=%v  delta_us p50=%d p99=%d max=%d  (expected=%d, p99_overrun=%.1fx)",
-		len(deltas), cadence, p50, p99, maxD, expected, float64(p99)/float64(expected))
+	mode := "demand"
+	if forceGC {
+		mode = "forced"
+	}
+	b.Logf("gc=%s n=%d cadence=%v  delta_us p50=%d p99=%d max=%d  (expected=%d, p99_overrun=%.1fx)",
+		mode, len(deltas), cadence, p50, p99, maxD, expected, float64(p99)/float64(expected))
 }

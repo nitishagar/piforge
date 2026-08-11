@@ -29,6 +29,12 @@ jobs:
         continue-on-error: true # warnings-as-errors can wait; surface for now
       - name: Test
         run: cargo test --lib --tests
+      - name: Test (hw feature, pure-logic + ABI)
+        # Compiles the hw path (a second compile gate beyond cross-compile) and
+        # runs the no-hardware-needed hw tests: the gpio_v2 ABI size-assertions
+        # and the edge_label/since_us/bus_num_from_path/resolve_chip decoders.
+        # Scope capture boundedness stays a manual Pi gate (off-Pi-untestable).
+        run: cargo test --features hw --lib --tests
       - name: Build (eval binary)
         run: cargo build --release --bin piforge-eval
       - name: Mock eval parity check

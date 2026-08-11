@@ -1098,6 +1098,7 @@ dependencies = [
  "criterion",
  "gpiod",
  "linux-embedded-hal",
+ "nix 0.27.1",
  "parking_lot",
  "reqwest",
  "serde",

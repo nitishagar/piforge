@@ -1,5 +1,3 @@
-// Command piforge runs the interactive PiForge agent against a local
-// llama-server. Configure via piforge.toml or PIFORGE_* env vars.
 package main
 
 import (

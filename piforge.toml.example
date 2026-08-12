@@ -19,6 +19,29 @@ api_key = "dummy"
 max_tokens = 1024
 temperature = 0.2
 
+# --- Cloud providers (optional) ---------------------------------------------
+# piforge is OpenAI-compatible, so any API-key provider works. Easiest: set a
+# `provider` name and export PIFORGE_API_KEY — the endpoint + model are filled
+# from a built-in registry (see docs/cloud-providers.md). Leave `api_key` as
+# "dummy" here; a real key must NOT be written to this file (it would leak).
+#
+# PRIVACY: pointing piforge at a cloud provider sends the symptom, the setup
+# file contents, and tool results (sensor reads, dmesg, board strings) OFF the
+# device to the provider. Only use a provider you trust with that data.
+#
+# Choose ONE provider (then `export PIFORGE_API_KEY=<your-key>`):
+#
+# # provider = "zai-coding"   # z.ai GLM Coding Plan subscription (/api/coding/paas/v4)
+# # provider = "zai"          # z.ai pay-as-you-go API balance (/api/paas/v4)
+# # provider = "openai"       # OpenAI
+# # provider = "kimi"         # Moonshot Kimi
+# # provider = "openrouter"   # gateway → Claude / Gemini
+#
+# Prefer the explicit path? Leave `provider` unset and set base_url + model:
+# # base_url = "https://your-endpoint/v1"
+# # model    = "glm-4.6"      # explicit base_url/model always override the preset
+# --- end cloud presets -------------------------------------------------------
+
 [agent]
 max_turns = 12
 # Pre-populate the first turn with a telemetry snapshot to cut round-trips.

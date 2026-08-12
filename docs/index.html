@@ -48,7 +48,7 @@
       <div class="container">
         <div class="badge">
           <span class="dot"></span>
-          Built for Raspberry Pi 5 · pure Go · Apache-2.0
+          Built for Raspberry Pi 5 · Rust · Apache-2.0
         </div>
         <h1>
           The agent that understands<br />
@@ -132,11 +132,12 @@
           </div>
           <div class="feature">
             <div class="feature-icon">⚡</div>
-            <h3>Pure-Go, one binary</h3>
+            <h3>Pure Rust, one binary</h3>
             <p>
-              No CGo. Cross-compiles to a single static <code>linux/arm64</code>
-              binary (~6 MB) you drop on the Pi. Built on llama.cpp's
-              OpenAI-compatible server.
+              No C dependency (the <code>gpiod</code> crate talks to
+              <code>/dev/gpiochipN</code> directly). Cross-compiles to a single
+              static <code>aarch64</code> binary (~2.7 MB) you drop on the Pi.
+              Built on llama.cpp's OpenAI-compatible server.
             </p>
           </div>
           <div class="feature">
@@ -271,12 +272,12 @@ sudo usermod -aG gpio,i2c,spi,dialout $USER
 
         <div class="stats">
           <div>
-            <div class="stat-num">6MB</div>
-            <div class="stat-label">static arm64 binary</div>
+            <div class="stat-num">~2.7MB</div>
+            <div class="stat-label">static aarch64 binary</div>
           </div>
           <div>
             <div class="stat-num">0</div>
-            <div class="stat-label">CGo dependencies</div>
+            <div class="stat-label">C dependencies</div>
           </div>
           <div>
             <div class="stat-num">12mA</div>
@@ -292,7 +293,7 @@ sudo usermod -aG gpio,i2c,spi,dialout $USER
 
     <footer>
       <div class="container">
-        <p>Apache-2.0 · Raspberry Pi 5 · pure Go</p>
+        <p>Apache-2.0 · Raspberry Pi 5 · Rust</p>
         <ul>
           <li>
             <a

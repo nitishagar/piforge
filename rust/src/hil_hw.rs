@@ -10,6 +10,7 @@
 
 use parking_lot::Mutex;
 use std::collections::HashMap;
+use std::os::unix::io::FromRawFd;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -133,7 +134,146 @@ impl Tool for GpioTool {
     }
 }
 
-// ---------------- Scope (the moat: kernel edge events) ----------------
+// ---------------- Scope (kernel edge events via a raw-fd ppoll loop) ----------------
+//
+// The scope path does NOT use gpiod's `Lines`/`read_event`: `read_event` blocks
+// until the next edge with no timeout argument, so the old `while Instant::now()
+// < deadline` loop was never re-evaluated on an idle pin — the capture hung
+// today on a quiet pin. Wrapping it in `tokio::time::timeout` +
+// `spawn_blocking` would instead leak a blocking thread on every idle-pin
+// timeout (tokio blocking threads are not interruptible), and idle-pin scope is
+// the common case (the user scopes a pin to *see if* it's toggling).
+//
+// Committed mechanism: open `/dev/gpiochipN` directly, issue the
+// kernel's GPIO_V2 line-request ioctls (input + both edges) to obtain a line fd,
+// then `ppoll` that fd with a duration-relative deadline. ppoll bounds the
+// capture at the syscall level (returns on timeout) with zero thread leak, and a
+// stray SIGCHLD from the agent's own i2cdetect/vcgencmd/i2cget shell-outs (or
+// tokio child reaping) surfaces as EINTR and is retried against the remaining
+// deadline rather than truncating a capture on a *toggling* pin. The GPIO get/set
+// path stays on gpiod's `Lines` — those calls return promptly; only `read_event`
+// blocks. The GPIO_V2 structs/constants/ioctl-numbers are authored in-tree
+// (below) — they are NOT in nix or libc; nix contributes only the
+// `ioctl_readwrite!` macro (the `gpio_get_line` wrapper) and `ppoll`.
+
+/// In-tree `GPIO_V2` compat shim, mirrored from `gpiod-core-0.3.0/src/raw/v2.rs`
+/// (itself a mirror of the kernel `uapi/linux/gpio.h` ABI). Sized for aarch64
+/// Linux (the only target the `hw` feature is built for); the size-assertion
+/// test guards the ioctl payload layout.
+#[allow(dead_code)] // FFI ABI definitions; not every field is read by us.
+pub mod gpio_v2 {
+    pub const GPIO_MAGIC: u8 = 0xB4;
+    pub const GPIO_MAX_NAME_SIZE: usize = 32;
+    pub const GPIO_LINES_MAX: usize = 64;
+    pub const GPIO_LINE_NUM_ATTRS_MAX: usize = 10;
+
+    pub const GPIO_LINE_FLAG_INPUT: u64 = 1 << 2;
+    pub const GPIO_LINE_FLAG_EDGE_RISING: u64 = 1 << 4;
+    pub const GPIO_LINE_FLAG_EDGE_FALLING: u64 = 1 << 5;
+    pub const GPIO_LINE_FLAG_EDGE_BOTH: u64 =
+        GPIO_LINE_FLAG_EDGE_RISING | GPIO_LINE_FLAG_EDGE_FALLING;
+
+    /// Kernel `gpio_v2_line_event.id` values.
+    pub const GPIO_LINE_EVENT_RISING_EDGE: u32 = 1;
+    pub const GPIO_LINE_EVENT_FALLING_EDGE: u32 = 2;
+
+    #[derive(Clone, Copy)]
+    #[repr(C)]
+    pub union GpioLineAttrVal {
+        pub flags: u64,
+        pub values: u64,
+        pub debounce_period_us: u32,
+    }
+
+    impl Default for GpioLineAttrVal {
+        fn default() -> Self {
+            Self { values: 0 }
+        }
+    }
+
+    #[derive(Clone, Copy, Default)]
+    #[repr(C)]
+    pub struct GpioLineAttr {
+        pub id: u32,
+        padding: u32,
+        pub val: GpioLineAttrVal,
+    }
+
+    #[derive(Clone, Copy, Default)]
+    #[repr(C)]
+    pub struct GpioLineConfigAttr {
+        pub attr: GpioLineAttr,
+        pub mask: u64,
+    }
+
+    #[derive(Clone, Copy, Default)]
+    #[repr(C)]
+    pub struct GpioLineConfig {
+        pub flags: u64,
+        pub num_attrs: u32,
+        padding: [u32; 5],
+        pub attrs: [GpioLineConfigAttr; GPIO_LINE_NUM_ATTRS_MAX],
+    }
+
+    #[derive(Clone, Copy)]
+    #[repr(C)]
+    pub struct GpioLineRequest {
+        pub offsets: [u32; GPIO_LINES_MAX],
+        pub consumer: [u8; GPIO_MAX_NAME_SIZE],
+        pub config: GpioLineConfig,
+        pub num_lines: u32,
+        pub event_buffer_size: u32,
+        padding: [u32; 5],
+        pub fd: i32,
+    }
+
+    impl Default for GpioLineRequest {
+        fn default() -> Self {
+            Self {
+                offsets: [0; GPIO_LINES_MAX],
+                consumer: [0; GPIO_MAX_NAME_SIZE],
+                config: Default::default(),
+                num_lines: 0,
+                event_buffer_size: 0,
+                padding: [0; 5],
+                fd: 0,
+            }
+        }
+    }
+
+    /// Kernel `gpio_v2_line_event` — one is read from the line fd per edge.
+    /// `timestamp_ns` is CLOCK_MONOTONIC; `id` is the edge kind.
+    #[derive(Clone, Copy, Default)]
+    #[repr(C)]
+    pub struct GpioLineEvent {
+        pub timestamp_ns: u64,
+        pub id: u32,
+        pub offset: u32,
+        pub seqno: u32,
+        pub line_seqno: u32,
+        padding: [u32; 6],
+    }
+
+    /// GPIO_V2_GET_LINE_IOCTL: request a line and get back an fd for edge events.
+    /// Mirrors gpiod-core's `nix::ioctl_readwrite!(gpio_get_line, GPIO_MAGIC, 0x07, GpioLineRequest)`.
+    nix::ioctl_readwrite!(gpio_get_line, GPIO_MAGIC, 0x07, GpioLineRequest);
+
+    #[cfg(test)]
+    mod test {
+        use super::*;
+        use std::mem::size_of;
+        // ABI size assertions — catch a struct-layout regression that would
+        // corrupt the ioctl payload. Values mirror the kernel/gpiod-core sizes.
+        #[test]
+        fn sizes() {
+            assert_eq!(size_of::<GpioLineAttr>(), 16);
+            assert_eq!(size_of::<GpioLineConfigAttr>(), 24);
+            assert_eq!(size_of::<GpioLineConfig>(), 272);
+            assert_eq!(size_of::<GpioLineRequest>(), 592);
+            assert_eq!(size_of::<GpioLineEvent>(), 48);
+        }
+    }
+}
 
 pub struct ScopeTool {
     chip: String,
@@ -164,67 +304,192 @@ impl Tool for ScopeTool {
                 format!("duration must be 1..5000 ms, got {dur_ms}"),
             );
         }
-        let chip = match gpiod::Chip::new(&self.chip) {
-            Ok(c) => c,
-            Err(e) => return ToolResult::err("scope", format!("open {}: {e}", self.chip)),
-        };
-        let opts = gpiod::Options::input([pin])
-            .edge(gpiod::EdgeDetect::Both)
-            .consumer("piforge-scope");
-        let mut lines = match chip.request_lines(opts) {
-            Ok(l) => l,
-            Err(e) => return ToolResult::err("scope", format!("request pin {pin} for edges: {e}")),
-        };
-        // Capture edges for the window in a blocking task (read_event is sync).
-        let dur = Duration::from_millis(dur_ms as u64);
-        let events = tokio::task::spawn_blocking(move || {
-            let _chip = chip; // keep chip alive
-            let deadline = std::time::Instant::now() + dur;
-            let mut out: Vec<(u64, &'static str)> = vec![];
-            while std::time::Instant::now() < deadline {
-                // Non-blocking-ish: short timeout via line config would be ideal;
-                // gpiod 0.3 read_event blocks. Bound with a deadline + small sleeps.
-                if let Ok(ev) = lines.read_event() {
-                    let edge = edge_label(&ev);
-                    out.push((elapsed_us(&ev), edge));
-                } else {
-                    std::thread::sleep(Duration::from_millis(5));
-                }
+        // Open the character device directly (raw-fd path; gpiod bypassed here).
+        let chip_path = format!("/dev/{}", self.chip);
+        let chip_fd = match nix::fcntl::open(
+            chip_path.as_str(),
+            nix::fcntl::OFlag::O_RDWR | nix::fcntl::OFlag::O_CLOEXEC,
+            nix::sys::stat::Mode::empty(),
+        ) {
+            Ok(fd) => fd,
+            Err(e) => {
+                return ToolResult::err(
+                    "scope",
+                    format!("open {chip_path}: {e} (is user in 'gpio' group?)"),
+                )
             }
-            out
-        })
-        .await
-        .unwrap_or_default();
-        let count = events.len();
-        let rate = if dur_ms > 0.0 {
-            count as f64 / (dur_ms / 1000.0)
-        } else {
-            0.0
         };
+        // Request the line for input + both-edge detection. The line offset IS
+        // the agent's `pin`, passed straight through (verified against gpiod:
+        // `Options::input([pin])` → `request.offsets`, so the same pin hits the
+        // same line — no lookup table needed).
+        let mut req = gpio_v2::GpioLineRequest::default();
+        req.num_lines = 1;
+        req.offsets[0] = pin;
+        req.config.flags = gpio_v2::GPIO_LINE_FLAG_INPUT | gpio_v2::GPIO_LINE_FLAG_EDGE_BOTH;
+        let consumer = b"piforge-scope\0";
+        req.consumer[..consumer.len()].copy_from_slice(consumer);
+        let line_fd_raw = match unsafe { gpio_v2::gpio_get_line(chip_fd, &mut req) } {
+            Ok(_) => req.fd,
+            Err(e) => {
+                // No line fd was created — close the chip fd via a transient File.
+                drop(unsafe { std::fs::File::from_raw_fd(chip_fd) });
+                return ToolResult::err("scope", format!("request pin {pin} for edges: {e}"));
+            }
+        };
+        // Hand both fds to std::fs::File so they close on drop (incl. across the
+        // spawn_blocking task). File also gives AsFd for ppoll + Read for events.
+        // `_chip_file` is held alive in this scope for the capture, then drops.
+        let _chip_file = unsafe { std::fs::File::from_raw_fd(chip_fd) };
+        let mut line_file = unsafe { std::fs::File::from_raw_fd(line_fd_raw) };
+        let dur = Duration::from_millis(dur_ms as u64);
+        // Bounded capture in a blocking task. ppoll bounds it at the syscall
+        // level; the task completes on timeout, so no blocking-thread leak.
+        let captured =
+            tokio::task::spawn_blocking(move || capture_edges(&mut line_file, dur)).await;
+        let (events, notice) = match captured {
+            Ok(x) => x,
+            Err(e) => return ToolResult::err("scope", format!("capture task: {e}")),
+        };
+        let count = events.len();
+        let rate = count as f64 / (dur_ms / 1000.0);
         let ev_json: Vec<Value> = events
             .iter()
             .map(|(t, e)| json!({"t_us":t,"edge":e}))
             .collect();
-        ToolResult::ok(
+        let mut out = ToolResult::ok(
             "scope",
             json!({"pin":pin,"duration_ms":dur_ms,"edges":count,"rate_hz":rate,"events":ev_json}),
-        )
+        );
+        if let Some(n) = notice {
+            out.notice = Some(n);
+        }
+        out
     }
 }
 
-// gpiod 0.3 Event edge-kind + timestamp helpers. The crate exposes an Event
-// struct; we read its fields defensively to stay robust to minor version drift.
-fn edge_label(_ev: &gpiod::Event) -> &'static str {
-    "edge"
+/// Decode the kernel event's edge id → the eval-stable string (matches sim:
+/// `sim.rs` emits "rising"/"falling").
+pub fn edge_label(ev: &gpio_v2::GpioLineEvent) -> &'static str {
+    match ev.id {
+        gpio_v2::GPIO_LINE_EVENT_RISING_EDGE => "rising",
+        gpio_v2::GPIO_LINE_EVENT_FALLING_EDGE => "falling",
+        _ => "edge",
+    }
 }
-fn elapsed_us(_ev: &gpiod::Event) -> u64 {
-    0
+
+/// Microsecond offset of this event from the first event in the capture. The
+/// kernel/gpiod timestamp epoch is arbitrary (CLOCK_MONOTONIC, crate-unspecified
+/// base), so a within-capture offset is the monotonic, portable quantity. Uses
+/// saturating_sub for robustness.
+pub fn since_us(ev: &gpio_v2::GpioLineEvent, first_ns: u64) -> u64 {
+    ev.timestamp_ns.saturating_sub(first_ns) / 1000
+}
+
+#[derive(Debug)]
+enum PollOutcome {
+    Readable,
+    Timeout,
+    /// Stray signal (e.g. SIGCHLD) interrupted ppoll; retry against the deadline.
+    Eintr,
+    /// Line fd reported POLLERR/POLLHUP (chip gone / line released).
+    Hup,
+    Err(nix::errno::Errno),
+}
+
+/// Bounded edge capture: ppoll the line fd for `dur`, reading one
+/// `gpio_v2_line_event` per readiness. Returns `(events, notice)` where events
+/// are `(since_us, edge_label)` pairs and notice is set iff the capture ended
+/// early. Always returns within ~`dur` wall-clock; EINTR is retried, not fatal.
+fn capture_edges(
+    line: &mut std::fs::File,
+    dur: Duration,
+) -> (Vec<(u64, &'static str)>, Option<String>) {
+    use std::io::Read;
+    let start = std::time::Instant::now();
+    let mut first_ns: Option<u64> = None;
+    let mut events: Vec<(u64, &'static str)> = Vec::new();
+    let mut notice: Option<String> = None;
+    let ev_size = std::mem::size_of::<gpio_v2::GpioLineEvent>();
+    loop {
+        // Read the clock once and subtract saturatingly: `Duration - Duration`
+        // panics on underflow (std `Sub` uses `expect`), and under `panic =
+        // "abort"` that would abort the binary mid-capture. A re-entrant
+        // edge/EINTR return could cross the `dur` boundary in the ns gap between
+        // two `elapsed()` reads; a single read + saturating_sub closes it.
+        let elapsed = start.elapsed();
+        if elapsed >= dur {
+            break;
+        }
+        let remaining = dur.saturating_sub(elapsed);
+        // ppoll bounds the wait. The immutable borrow of `line` (via the PollFd)
+        // ends with this block, freeing `line` for the mutable read below.
+        let outcome = {
+            let mut fds = [nix::poll::PollFd::new(&*line, nix::poll::PollFlags::POLLIN)];
+            let timeout = nix::sys::time::TimeSpec::from(remaining);
+            match nix::poll::ppoll(&mut fds, Some(timeout), None) {
+                Ok(0) => PollOutcome::Timeout,
+                Ok(_) => {
+                    let rv = fds[0].revents().unwrap_or(nix::poll::PollFlags::empty());
+                    if rv.contains(nix::poll::PollFlags::POLLIN) {
+                        PollOutcome::Readable
+                    } else if rv
+                        .intersects(nix::poll::PollFlags::POLLERR | nix::poll::PollFlags::POLLHUP)
+                    {
+                        PollOutcome::Hup
+                    } else {
+                        PollOutcome::Timeout
+                    }
+                }
+                Err(nix::errno::Errno::EINTR) => PollOutcome::Eintr,
+                Err(e) => PollOutcome::Err(e),
+            }
+        };
+        match outcome {
+            PollOutcome::Timeout => break,
+            PollOutcome::Eintr => continue, // retry against the remaining deadline
+            PollOutcome::Hup => {
+                notice = Some("capture ended early: line fd reported POLLERR/POLLHUP".into());
+                break;
+            }
+            PollOutcome::Err(e) => {
+                notice = Some(format!("capture ended early: ppoll: {e}"));
+                break;
+            }
+            PollOutcome::Readable => {
+                let mut ev = gpio_v2::GpioLineEvent::default();
+                // SAFETY: GpioLineEvent is #[repr(C)], 48 bytes, no implicit
+                // padding (size-asserted); reading its raw bytes from the kernel
+                // line fd is the documented GPIO_V2 event-read path. `ev` is
+                // properly aligned.
+                let buf: &mut [u8] = unsafe {
+                    std::slice::from_raw_parts_mut(&mut ev as *mut _ as *mut u8, ev_size)
+                };
+                match line.read(buf) {
+                    Ok(n) if n == ev_size => {
+                        let first = *first_ns.get_or_insert(ev.timestamp_ns);
+                        events.push((since_us(&ev, first), edge_label(&ev)));
+                    }
+                    Ok(_) => continue, // partial/zero read (unexpected for gpio cdev); skip
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                    Err(e) => {
+                        notice = Some(format!("capture ended early: read: {e}"));
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    (events, notice)
 }
 
 // ---------------- I2C ----------------
 
 pub struct I2cTool {
-    bus_path: String,
+    /// Parsed bus index (e.g. "1") cached from the configured `/dev/i2c-N`
+    /// path at construction so the config knob is honored in every
+    /// `i2cdetect`/`i2cget` shell-out, not hardcoded.
+    bus_num: String,
     gate: Option<std::sync::Arc<dyn Gate>>,
 }
 impl I2cTool {
@@ -232,10 +497,32 @@ impl I2cTool {
         bus_path: impl Into<String>,
         gate: Option<std::sync::Arc<dyn Gate>>,
     ) -> std::sync::Arc<Self> {
+        let bus_path = bus_path.into();
         std::sync::Arc::new(Self {
-            bus_path: bus_path.into(),
+            bus_num: bus_num_from_path(&bus_path),
             gate,
         })
+    }
+}
+
+/// Extract the bus index from a `/dev/i2c-N` path so the config knob is
+/// honored end-to-end, not cosmetically. `"/dev/i2c-1"` → `"1"`,
+/// `"/dev/i2c-10"` → `"10"`, `"1"` → `"1"`. Falls back to `"1"` (the Pi default)
+/// when the path has no trailing digits, so a malformed config degrades to the
+/// historical behavior rather than panicking.
+pub fn bus_num_from_path(path: &str) -> String {
+    let digits: String = path
+        .chars()
+        .rev()
+        .take_while(|c| c.is_ascii_digit())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    if digits.is_empty() {
+        "1".to_string()
+    } else {
+        digits
     }
 }
 
@@ -262,7 +549,7 @@ impl Tool for I2cTool {
         match action {
             "scan" => {
                 let out = tokio::process::Command::new("i2cdetect")
-                    .args(["-y", "1"])
+                    .args(["-y", self.bus_num.as_str()])
                     .output()
                     .await;
                 match out {
@@ -305,7 +592,7 @@ impl Tool for I2cTool {
             }
             "detect" => {
                 let out = tokio::process::Command::new("i2cdetect")
-                    .args(["-y", "1"])
+                    .args(["-y", self.bus_num.as_str()])
                     .output()
                     .await;
                 let Ok(o) = out else {
@@ -338,7 +625,12 @@ impl Tool for I2cTool {
                     let r = reg.wrapping_add(i as u8);
                     // i2cget expects the address in hex (e.g. 0x76), not decimal.
                     let out = tokio::process::Command::new("i2cget")
-                        .args(["-y", "1", &addr_hex, &format!("0x{r:02x}")])
+                        .args([
+                            "-y",
+                            self.bus_num.as_str(),
+                            &addr_hex,
+                            &format!("0x{r:02x}"),
+                        ])
                         .output()
                         .await;
                     match out {
@@ -500,10 +792,15 @@ impl ThrottledReader for TelemetryTool {
 
 // ---------------- Inventory ----------------
 
-pub struct InventoryTool;
+pub struct InventoryTool {
+    /// I2C bus index (e.g. "1") for the inventory `i2cdetect` call.
+    bus_num: String,
+}
 impl InventoryTool {
-    pub fn new() -> std::sync::Arc<Self> {
-        std::sync::Arc::new(Self)
+    pub fn new(bus_num: impl Into<String>) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            bus_num: bus_num.into(),
+        })
     }
 }
 
@@ -531,7 +828,7 @@ impl Tool for InventoryTool {
             inv["gpiochips"] = json!(String::from_utf8_lossy(&o.stdout).trim());
         }
         if let Ok(o) = std::process::Command::new("i2cdetect")
-            .args(["-y", "1"])
+            .args(["-y", self.bus_num.as_str()])
             .output()
         {
             if o.status.success() {
@@ -544,19 +841,21 @@ impl Tool for InventoryTool {
     }
 }
 
-/// Build the full real-hardware tool-box for the interactive agent.
+/// Build the full real-hardware tool-box for the interactive agent. The shared
+/// `telemetry` instance is pushed directly instead of constructing a second one,
+/// so the Broker's under-voltage STOP and the agent-facing tool read the same
+/// vcgencmd state. `i2c_bus` is threaded into I2cTool + InventoryTool — the
+/// config knob is honored end-to-end, not hardcoded.
 pub fn build_tools(
     chip: &str,
     i2c_bus: &str,
     gate: std::sync::Arc<dyn Gate>,
+    telemetry: std::sync::Arc<TelemetryTool>,
 ) -> crate::hil::ToolVec {
-    // Suppress unused-warnings for fields the MVP doesn't wire yet; keep the
-    // API stable so the agent entrypoint compiles uniformly across builds.
-    let _ = i2c_bus;
     vec![
-        InventoryTool::new(),
-        TelemetryTool::new(),
-        I2cTool::new("/dev/i2c-1", Some(gate.clone())),
+        InventoryTool::new(bus_num_from_path(i2c_bus)),
+        telemetry,
+        I2cTool::new(i2c_bus, Some(gate.clone())),
         GpioTool::new(chip, Some(gate.clone())),
         ScopeTool::new(chip),
         crate::sim::CodeEditTool::new("."),

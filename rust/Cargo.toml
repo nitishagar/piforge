@@ -37,12 +37,20 @@ parking_lot = "0.12"
 gpiod = { version = "0.3", optional = true }
 # I2C via linux-embedded-hal (pure Rust ioctl). Linux-only; guarded.
 linux-embedded-hal = { version = "0.4", optional = true }
+# Raw-fd scope path: open /dev/gpiochipN directly, GPIO_V2 ioctls +
+# ppoll-bounded edge capture. Feature gates (nix-0.27.1): `fs` → `open`/`OFlag`/
+# `Mode` + `sys::stat`; `poll` → the whole `nix::poll` module (PollFd + the poll
+# fn); `signal` → `ppoll` itself (its inner feature! block in poll.rs); `ioctl`
+# → the `nix::ioctl_readwrite!` macro + `sys::ioctl` (the macro expands to
+# `$crate::sys::ioctl::ioctl_num_type`, so without `ioctl` it won't compile — and
+# gpiod-core's own nix-0.26 dep does not unify across the semver split).
+nix = { version = "0.27", default-features = false, features = ["fs", "poll", "signal", "ioctl"], optional = true }
 
 [features]
 # Hardware access compiles only on Linux (mirrors the Go build-tag split).
 # Default on linux; off elsewhere (dev/test on macOS).
 default = []
-hw = ["dep:gpiod", "dep:linux-embedded-hal"]
+hw = ["dep:gpiod", "dep:linux-embedded-hal", "dep:nix"]
 
 # Release profile: small + stripped (the "one small static binary" goal).
 [profile.release]

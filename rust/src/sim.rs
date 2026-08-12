@@ -378,13 +378,17 @@ impl Tool for ScopeTool {
     }
     async fn execute(&self, args: &Value) -> ToolResult {
         let pin = args.get("pin").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        // `duration_ms` mirrors the hw scope's result field: the two builds must
+        // expose the same result-JSON field names, so a hw-only rename can't
+        // desync the KV-cache prefix or the eval scorer.
+        let dur_ms = args.get("duration").and_then(|v| v.as_f64()).unwrap_or(0.0);
         let s = self.st.inner.lock();
         match s.gpio.get(&pin) {
             Some(p) => {
                 let edge = if p.value == 1 { "rising" } else { "falling" };
                 ToolResult::ok(
                     "scope",
-                    json!({"pin":pin,"edges":1,"rate_hz":0,"events":[{"t_us":0,"edge":edge}]}),
+                    json!({"pin":pin,"duration_ms":dur_ms,"edges":1,"rate_hz":0,"events":[{"t_us":0,"edge":edge}]}),
                 )
             }
             None => ToolResult::err("scope", format!("pin {pin} not in profile")),

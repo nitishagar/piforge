@@ -31,7 +31,11 @@ async fn main() -> Result<()> {
     cfg.validate()?;
 
     let client = Arc::new(Client::new(&cfg.server)?);
-    client.health_check().await.map_err(|e| anyhow::anyhow!("{e}\nstart llama-server first, e.g.:\n  llama-server -m <qwen3-4b-instruct-2507-q4_k_m.gguf> --jinja --port 8080 -c {} -ctk q8_0 -ctv q8_0", cfg.model.context))?;
+    client.health_check().await.map_err(|e| {
+        anyhow::anyhow!(
+            "{e}\n  (check server.base_url in piforge.toml, and PIFORGE_API_KEY for a cloud provider)"
+        )
+    })?;
 
     // cfg-selected tool construction — two builds, one thin binary. The `hw`
     // build (Linux, `--features hw`) reads live GPIO/I2C/telemetry through the

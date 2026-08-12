@@ -61,8 +61,9 @@ panic = "abort"
 strip = true
 
 [dev-dependencies]
-# For unit tests of the broker/sim/eval logic + the scope-jitter benchmark.
-tokio = { version = "1.53", features = ["test-util"] }
+# For unit tests of the broker/sim/eval logic, the scope-jitter benchmark, and
+# the provider retry/health-check tests (loopback TcpListener stub).
+tokio = { version = "1.53", features = ["test-util", "net", "io-util"] }
 criterion = { version = "0.5", default-features = false, features = ["plotters", "cargo_bench_support"] }
 
 [[bench]]

@@ -53,11 +53,27 @@ impl Default for ModelConfig {
     }
 }
 
+/// Default `server.base_url` (the local llama-server). Also the sentinel that
+/// tells [`apply_provider`] the user didn't override it, so a provider preset
+/// may fill it in.
+const DEFAULT_BASE_URL: &str = "http://127.0.0.1:8080/v1";
+/// Default `server.model` (a local llama-server ignores it). Same sentinel
+/// purpose for provider presets.
+const DEFAULT_MODEL: &str = "piforge";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ServerConfig {
     pub base_url: String,
     pub api_key: String,
+    /// Model id sent in the chat-completion request body. A local llama-server
+    /// ignores this (it serves its loaded GGUF); a cloud provider requires the
+    /// real id (e.g. `glm-4.6`, `gpt-4o`). Default keeps the prior local behavior.
+    pub model: String,
+    /// Optional provider preset name (e.g. `"zai-coding"`, `"openai"`). When set,
+    /// `base_url` + `model` are filled from a built-in registry (explicit toml or
+    /// env values still win). Empty => manual `base_url` + `model` mode.
+    pub provider: String,
     pub max_tokens: u32,
     pub temperature: f32,
 }
@@ -65,8 +81,10 @@ pub struct ServerConfig {
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            base_url: "http://127.0.0.1:8080/v1".into(),
+            base_url: DEFAULT_BASE_URL.into(),
             api_key: "dummy".into(),
+            model: DEFAULT_MODEL.into(),
+            provider: String::new(),
             max_tokens: 1024,
             temperature: 0.2,
         }
@@ -160,6 +178,7 @@ pub fn load(path: &str) -> Result<Config> {
         cfg = toml::from_str(&text).map_err(|e| anyhow!("decode {path}: {e}"))?;
     }
     apply_env(&mut cfg);
+    apply_provider(&mut cfg)?;
     Ok(cfg)
 }
 
@@ -167,6 +186,27 @@ fn apply_env(cfg: &mut Config) {
     if let Ok(v) = env::var("PIFORGE_BASE_URL") {
         if !v.is_empty() {
             cfg.server.base_url = v;
+        }
+    }
+    // Model id (server.model); env wins over toml and provider presets.
+    if let Ok(v) = env::var("PIFORGE_MODEL") {
+        if !v.is_empty() {
+            cfg.server.model = v;
+        }
+    }
+    // Cloud API key. Env wins over toml (applied AFTER the toml parse in load()),
+    // so a real key can be supplied without ever writing it to a committed file.
+    // Unset → the toml/default "dummy" remains, which local llama-server ignores.
+    if let Ok(v) = env::var("PIFORGE_API_KEY") {
+        if !v.is_empty() {
+            cfg.server.api_key = v;
+        }
+    }
+    // Provider preset name (e.g. "zai-coding"). Resolved into base_url + model by
+    // apply_provider() after env; env wins over the toml value.
+    if let Ok(v) = env::var("PIFORGE_PROVIDER") {
+        if !v.is_empty() {
+            cfg.server.provider = v;
         }
     }
     if let Ok(v) = env::var("PIFORGE_MODEL_PATH") {
@@ -203,6 +243,104 @@ fn apply_env(cfg: &mut Config) {
             cfg.safety.arm_mode = v;
         }
     }
+}
+
+/// A built-in provider preset: the endpoint + a recommended model.
+#[derive(Clone, Copy)]
+struct ProviderPreset {
+    base_url: &'static str,
+    model: &'static str,
+}
+
+/// Known provider presets. The HTTP client stays generic (one OpenAI-compatible
+/// client); this table is pure DATA mapping a name → endpoint + model, so a user
+/// sets `provider = "<name>"` + `PIFORGE_API_KEY` and the endpoint follows from
+/// the provider. To keep it generic, no provider gets bespoke request/auth code.
+///
+/// z.ai note: it exposes two OpenAI-compat endpoints billed differently —
+/// `/api/paas/v4` (pay-as-you-go) vs `/api/coding/paas/v4` (GLM Coding Plan
+/// subscription). A Coding-Plan key on `/api/paas/v4` returns 1113; use the
+/// matching endpoint.
+fn known_providers() -> &'static [(&'static str, ProviderPreset)] {
+    &[
+        (
+            "zai",
+            ProviderPreset {
+                base_url: "https://api.z.ai/api/paas/v4",
+                model: "glm-4.6",
+            },
+        ),
+        (
+            "zai-paas",
+            ProviderPreset {
+                base_url: "https://api.z.ai/api/paas/v4",
+                model: "glm-4.6",
+            },
+        ),
+        (
+            "zai-coding",
+            ProviderPreset {
+                base_url: "https://api.z.ai/api/coding/paas/v4",
+                model: "glm-4.6",
+            },
+        ),
+        (
+            "openai",
+            ProviderPreset {
+                base_url: "https://api.openai.com/v1",
+                model: "gpt-4o",
+            },
+        ),
+        (
+            "kimi",
+            ProviderPreset {
+                base_url: "https://api.moonshot.cn/v1",
+                model: "moonshot-v1-32k",
+            },
+        ),
+        (
+            "openrouter",
+            ProviderPreset {
+                base_url: "https://openrouter.ai/api/v1",
+                model: "anthropic/claude-3.5-sonnet",
+            },
+        ),
+    ]
+}
+
+fn lookup_provider(name: &str) -> Option<ProviderPreset> {
+    let lower = name.to_ascii_lowercase();
+    known_providers()
+        .iter()
+        .find(|(n, _)| *n == lower)
+        .map(|(_, p)| *p)
+}
+
+/// Resolve a provider preset: fill `base_url` + `model` from the registry when
+/// the user left them at the default (explicit toml/env values still win).
+/// Errors on an unknown provider name, listing the known ones.
+fn apply_provider(cfg: &mut Config) -> Result<()> {
+    if cfg.server.provider.is_empty() {
+        return Ok(());
+    }
+    let preset = match lookup_provider(&cfg.server.provider) {
+        Some(p) => p,
+        None => {
+            let known: Vec<&str> = known_providers().iter().map(|(n, _)| *n).collect();
+            return Err(anyhow!(
+                "unknown server.provider {:?}; known providers: {}",
+                cfg.server.provider,
+                known.join(", ")
+            ));
+        }
+    };
+    if cfg.server.base_url == DEFAULT_BASE_URL {
+        cfg.server.base_url = preset.base_url.into();
+    }
+    if cfg.server.model == DEFAULT_MODEL {
+        cfg.server.model = preset.model.into();
+    }
+    Ok(())
 }
 
 /// Validate checks for obvious errors. Mirrors the Go Validate().

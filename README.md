@@ -60,6 +60,50 @@ GPIO outputs and I2C writes are Class I (physical) operations and require
 per-action human approval by default. Reads (`i2c`, `gpio get`, `scope`,
 `telemetry`) are always safe.
 
+## Cloud providers
+
+piforge speaks the OpenAI-compatible API, so it also points at any hosted,
+API-key model — not just a local llama-server. **Pick a provider by name and add
+your key**; the endpoint follows from the provider:
+
+```
+# in piforge.toml — choose a provider; the endpoint + model are filled in:
+[server]
+provider = "zai-coding"     # any name from the table below (or set PIFORGE_PROVIDER)
+
+# the key comes from the environment, never the repo:
+export PIFORGE_API_KEY=<your-key>
+```
+
+| `provider` | endpoint | model | notes |
+|---|---|---|---|
+| `zai-coding` | `https://api.z.ai/api/coding/paas/v4` | `glm-4.6` | bills a **GLM Coding Plan** subscription |
+| `zai` / `zai-paas` | `https://api.z.ai/api/paas/v4` | `glm-4.6` | z.ai pay-as-you-go API balance (not the Coding Plan) |
+| `openai` | `https://api.openai.com/v1` | `gpt-4o` | |
+| `kimi` | `https://api.moonshot.cn/v1` | `moonshot-v1-32k` | |
+| `openrouter` | `https://openrouter.ai/api/v1` | `anthropic/claude-3.5-sonnet` | gateway → Claude / Gemini |
+
+Prefer the explicit path instead? Leave `provider` unset and set `server.base_url`
++ `server.model` yourself (or via `PIFORGE_BASE_URL`). The provider shortcut only
+fills defaults — an explicit `base_url`/`model` (toml or env) always wins, and an
+unknown provider name is a config error.
+
+`PIFORGE_API_KEY` overrides `[server] api_key`; with it unset, the default
+`"dummy"` keeps the local llama-server path working. Auth failures (401/403)
+surface a message that names `PIFORGE_API_KEY`, and transient failures (429,
+5xx, connection resets/timeouts) are retried with bounded backoff.
+
+> **Privacy shift.** Pointing piforge at a cloud provider sends the symptom, the
+> setup file contents, and the tool results (sensor reads, `dmesg`, board
+> strings) **off the device** to the provider. The default local-appliance path
+> keeps everything on the Pi; cloud is opt-in. Only use a provider you trust with
+> that data.
+
+**Claude / Gemini** are reached through an OpenAI-compatible gateway such as
+OpenRouter or LiteLLM — piforge has no native Anthropic/Gemini adapter (the
+generic client covers them). See [`docs/cloud-providers.md`](docs/cloud-providers.md)
+for the full provider list, the retry/auth behavior, and the eval-gate workflow.
+
 ## Layout
 
 ```

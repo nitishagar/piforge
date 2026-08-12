@@ -3,9 +3,12 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use clap::Parser;
-use piforge::{agent::Agent, broker::Broker, config, hil::ToolVec, provider::Client, sim};
+use piforge::{agent::Agent, broker::Broker, config, hil::ToolVec, provider::Client};
 #[cfg(feature = "hw")]
 use piforge::{broker::ThrottledReader, hil_hw};
+// `sim` is referenced only by the sim (default) tool-box helper below.
+#[cfg(not(feature = "hw"))]
+use piforge::sim;
 
 #[derive(Parser)]
 #[command(

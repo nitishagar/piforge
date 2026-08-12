@@ -88,7 +88,12 @@ impl Client {
     /// opaque "HTTP 401".
     pub async fn health_check(&self) -> Result<()> {
         let url = format!("{}/models", self.base_url);
-        let resp = self.http.get(&url).bearer_auth(&self.api_key).send().await?;
+        let resp = self
+            .http
+            .get(&url)
+            .bearer_auth(&self.api_key)
+            .send()
+            .await?;
         let status = resp.status();
         // Always drain so the connection is released cleanly (uniform on both
         // paths); a /models body is small and this is a one-shot startup check.
@@ -102,7 +107,10 @@ impl Client {
                 "server health check failed at {} (HTTP {}): auth denied — check PIFORGE_API_KEY",
                 self.base_url, code
             ),
-            _ => format!("server health check failed at {} (HTTP {})", self.base_url, code),
+            _ => format!(
+                "server health check failed at {} (HTTP {})",
+                self.base_url, code
+            ),
         };
         Err(anyhow!(msg))
     }
@@ -503,7 +511,9 @@ mod tests {
                 break;
             }
         }
-        let headers_end = find_subslice(&buf, b"\r\n\r\n").map(|p| p + 4).unwrap_or(buf.len());
+        let headers_end = find_subslice(&buf, b"\r\n\r\n")
+            .map(|p| p + 4)
+            .unwrap_or(buf.len());
         let header_str = String::from_utf8_lossy(&buf[..headers_end]).to_string();
         let content_len = content_length(&header_str);
         // Drain the body so our response write doesn't race with the client send.
@@ -520,7 +530,10 @@ mod tests {
             .lines()
             .find(|l| l.to_ascii_lowercase().starts_with("authorization:"))
             .map(|l| l.trim().to_string());
-        Seen { request_line, auth_header }
+        Seen {
+            request_line,
+            auth_header,
+        }
     }
 
     fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
@@ -606,7 +619,10 @@ mod tests {
             "got: {}",
             s[0].request_line
         );
-        let auth = s[0].auth_header.as_deref().expect("bearer auth must be sent");
+        let auth = s[0]
+            .auth_header
+            .as_deref()
+            .expect("bearer auth must be sent");
         assert!(
             auth.to_ascii_lowercase().contains("bearer test-key"),
             "health check must send bearer auth: {auth}"
@@ -618,15 +634,24 @@ mod tests {
         let (addr, _seen) = spawn_stub(vec![Stub::Status(401)]).await;
         let client = Client::new(&cfg_for(addr)).unwrap();
         let err = client.health_check().await.unwrap_err().to_string();
-        assert!(err.contains("PIFORGE_API_KEY"), "401 must name the env var: {err}");
-        assert!(err.contains(&addr.to_string()), "401 must name base_url: {err}");
+        assert!(
+            err.contains("PIFORGE_API_KEY"),
+            "401 must name the env var: {err}"
+        );
+        assert!(
+            err.contains(&addr.to_string()),
+            "401 must name base_url: {err}"
+        );
     }
 
     #[tokio::test]
     async fn chat_retries_on_429_then_succeeds() {
         let (addr, seen) = spawn_stub(vec![Stub::Status(429), Stub::Status(200)]).await;
         let client = Client::build(&cfg_for(addr), fast_retry(), Duration::from_secs(5)).unwrap();
-        let resp = client.chat(&chat_req()).await.expect("should succeed after retry");
+        let resp = client
+            .chat(&chat_req())
+            .await
+            .expect("should succeed after retry");
         assert_eq!(resp.content, "ok");
         assert_eq!(resp.prompt_tokens, 1);
         assert_eq!(resp.completion, 2);
@@ -635,10 +660,17 @@ mod tests {
 
     #[tokio::test]
     async fn chat_retries_on_5xx_then_succeeds() {
-        let (addr, seen) =
-            spawn_stub(vec![Stub::Status(503), Stub::Status(500), Stub::Status(200)]).await;
+        let (addr, seen) = spawn_stub(vec![
+            Stub::Status(503),
+            Stub::Status(500),
+            Stub::Status(200),
+        ])
+        .await;
         let client = Client::build(&cfg_for(addr), fast_retry(), Duration::from_secs(5)).unwrap();
-        client.chat(&chat_req()).await.expect("should succeed after two retries");
+        client
+            .chat(&chat_req())
+            .await
+            .expect("should succeed after two retries");
         assert_eq!(seen.lock().unwrap().len(), 3);
     }
 
@@ -661,7 +693,10 @@ mod tests {
         let (addr, seen) = spawn_stub(vec![Stub::Status(401)]).await;
         let client = Client::build(&cfg_for(addr), fast_retry(), Duration::from_secs(5)).unwrap();
         let err = client.chat(&chat_req()).await.unwrap_err().to_string();
-        assert!(err.contains("PIFORGE_API_KEY"), "401 must name env var: {err}");
+        assert!(
+            err.contains("PIFORGE_API_KEY"),
+            "401 must name env var: {err}"
+        );
         assert_eq!(seen.lock().unwrap().len(), 1, "401 must NOT be retried");
     }
 
@@ -688,7 +723,10 @@ mod tests {
         let (addr, seen) = spawn_stub(vec![Stub::Status(403)]).await;
         let client = Client::build(&cfg_for(addr), fast_retry(), Duration::from_secs(5)).unwrap();
         let err = client.chat(&chat_req()).await.unwrap_err().to_string();
-        assert!(err.contains("PIFORGE_API_KEY"), "403 must name env var: {err}");
+        assert!(
+            err.contains("PIFORGE_API_KEY"),
+            "403 must name env var: {err}"
+        );
         assert_eq!(seen.lock().unwrap().len(), 1, "403 must NOT be retried");
     }
 
@@ -716,7 +754,10 @@ mod tests {
         // are recorded, proving the reset was retried (not just that it succeeded).
         let (addr, seen) = spawn_stub(vec![Stub::Reset, Stub::Status(200)]).await;
         let client = Client::build(&cfg_for(addr), fast_retry(), Duration::from_secs(5)).unwrap();
-        let resp = client.chat(&chat_req()).await.expect("reset should be retried");
+        let resp = client
+            .chat(&chat_req())
+            .await
+            .expect("reset should be retried");
         assert_eq!(resp.content, "ok");
         let g = seen.lock().unwrap();
         assert_eq!(g.len(), 2, "reset attempt + successful 200");
@@ -729,7 +770,10 @@ mod tests {
         let (addr, seen) = spawn_stub(vec![Stub::Hang, Stub::Status(200)]).await;
         let client =
             Client::build(&cfg_for(addr), fast_retry(), Duration::from_millis(80)).unwrap();
-        let resp = client.chat(&chat_req()).await.expect("timeout should be retried");
+        let resp = client
+            .chat(&chat_req())
+            .await
+            .expect("timeout should be retried");
         assert_eq!(resp.content, "ok");
         let g = seen.lock().unwrap();
         assert_eq!(g.len(), 2, "hang attempt + successful 200");
@@ -743,7 +787,10 @@ mod tests {
         let (addr, seen) = spawn_stub(vec![Stub::Reset; 8]).await;
         let client = Client::build(&cfg_for(addr), fast_retry(), Duration::from_secs(5)).unwrap();
         let err = client.chat(&chat_req()).await.unwrap_err().to_string();
-        assert!(err.contains("request failed"), "transport error surfaced: {err}");
+        assert!(
+            err.contains("request failed"),
+            "transport error surfaced: {err}"
+        );
         assert_eq!(
             seen.lock().unwrap().len(),
             4,

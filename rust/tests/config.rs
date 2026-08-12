@@ -20,7 +20,10 @@ fn write_temp_toml(name: &str, body: &str) -> std::path::PathBuf {
 #[test]
 fn api_key_env_overrides_toml() {
     let _g = ENV_LOCK.lock().unwrap();
-    let path = write_temp_toml("piforge_test_apikey_env.toml", "[server]\napi_key = \"from-toml\"\n");
+    let path = write_temp_toml(
+        "piforge_test_apikey_env.toml",
+        "[server]\napi_key = \"from-toml\"\n",
+    );
     std::env::set_var("PIFORGE_API_KEY", "from-env");
     let cfg = config::load(path.to_str().unwrap()).unwrap();
     std::env::remove_var("PIFORGE_API_KEY");
@@ -37,7 +40,10 @@ fn api_key_env_empty_does_not_override() {
     std::env::set_var("PIFORGE_API_KEY", ""); // empty must not clobber the toml value
     let cfg = config::load(path.to_str().unwrap()).unwrap();
     std::env::remove_var("PIFORGE_API_KEY");
-    assert_eq!(cfg.server.api_key, "from-toml", "empty env must not override");
+    assert_eq!(
+        cfg.server.api_key, "from-toml",
+        "empty env must not override"
+    );
 }
 
 #[test]
@@ -45,7 +51,10 @@ fn api_key_unset_falls_back_to_toml_then_default() {
     let _g = ENV_LOCK.lock().unwrap();
     std::env::remove_var("PIFORGE_API_KEY");
     // toml value is used when present and env is absent.
-    let path = write_temp_toml("piforge_test_apikey_toml.toml", "[server]\napi_key = \"from-toml\"\n");
+    let path = write_temp_toml(
+        "piforge_test_apikey_toml.toml",
+        "[server]\napi_key = \"from-toml\"\n",
+    );
     let cfg = config::load(path.to_str().unwrap()).unwrap();
     assert_eq!(cfg.server.api_key, "from-toml");
     // default "dummy" when neither toml nor env sets it (local llama-server path).
@@ -108,9 +117,14 @@ fn provider_unknown_errors_with_known_list() {
         "piforge_test_provider_bad.toml",
         "[server]\nprovider = \"nope\"\n",
     );
-    let err = config::load(path.to_str().unwrap()).unwrap_err().to_string();
+    let err = config::load(path.to_str().unwrap())
+        .unwrap_err()
+        .to_string();
     assert!(err.contains("unknown server.provider"), "{err}");
-    assert!(err.contains("zai-coding"), "must list known providers: {err}");
+    assert!(
+        err.contains("zai-coding"),
+        "must list known providers: {err}"
+    );
 }
 
 #[test]

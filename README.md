@@ -40,8 +40,8 @@ cargo build --release --features hw --target aarch64-unknown-linux-gnu --bin pif
 ```
 
 The `--features hw` flag compiles the real hardware tools (GPIO/I2C/scope/
-telemetry via `gpiod` + `i2c-tools` + `vcgencmd`). Without it, the sim-backed
-tools stand in so the loop runs on any host for dev/eval.
+telemetry via `gpiod` + in-process I2C ioctls + `vcgencmd`). Without it, the
+sim-backed tools stand in so the loop runs on any host for dev/eval.
 
 ## Run
 

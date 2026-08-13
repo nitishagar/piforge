@@ -78,6 +78,117 @@ fn summarize_aggregates() {
 // Suppress unused-warning for Setup import kept for parity with other tests.
 #[allow(dead_code)]
 fn _setup() -> Setup {
-    Setup::default()
+    Setup {
+        i2c_registers: Default::default(),
+        one_wire: vec![],
+        iio: vec![],
+        i2c_bus_present: true,
+        ..Setup::default()
+    }
 }
 type Setup = piforge::sim::Setup;
+
+#[tokio::test]
+async fn workspace_dirs_are_unique_across_cases() {
+    let root = std::env::temp_dir().join(format!("piforge-eval-iso-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(
+        root.join("a-shared.json"),
+        r#"{
+          "id": "iso-a",
+          "symptom": "case A seeds leftover",
+          "setup": {
+            "files": { "shared.py": "LEFTOVER_FROM_A" },
+            "throttled": "0x0"
+          },
+          "gold": {
+            "is_hardware_fault": true,
+            "fix_applies": "",
+            "fix_must_contain": []
+          }
+        }"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("b-shared.json"),
+        r#"{
+          "id": "iso-b",
+          "symptom": "case B must not see A's leftover",
+          "setup": {
+            "files": {},
+            "throttled": "0x0"
+          },
+          "gold": {
+            "is_hardware_fault": false,
+            "fix_applies": "shared.py",
+            "fix_must_contain": ["LEFTOVER_FROM_A"]
+          }
+        }"#,
+    )
+    .unwrap();
+
+    let (runner, _mock) = piforge::eval::Runner::new_mock(8, false);
+    let vs = runner
+        .run_all(root.to_str().unwrap(), |_| ())
+        .await
+        .expect("run_all");
+    assert_eq!(vs.len(), 2, "both isolation fixtures must be scored");
+    let a = vs
+        .iter()
+        .find(|v| v.case_id == "iso-a")
+        .expect("iso-a verdict");
+    let b = vs
+        .iter()
+        .find(|v| v.case_id == "iso-b")
+        .expect("iso-b verdict");
+    assert_eq!(a.case_id, "iso-a");
+    assert!(
+        !b.pass_,
+        "case B must not pass from case A's leftover shared.py (unique workspaces)"
+    );
+    assert!(
+        !b.notes.contains("malformed gold:"),
+        "iso-b has file gold so failure must be missing leftover, not malformed gold; notes={:?}",
+        b.notes
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[tokio::test]
+async fn malformed_gold_overwrites_notes() {
+    let root = std::env::temp_dir().join(format!(
+        "piforge-eval-malformed-test-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(
+        root.join("bad.json"),
+        r#"{
+          "id": "malformed-empty-fix",
+          "symptom": "this diagnosis would otherwise become notes",
+          "setup": { "throttled": "0x0" },
+          "gold": {
+            "is_hardware_fault": false,
+            "fix_applies": "",
+            "fix_must_contain": []
+          }
+        }"#,
+    )
+    .unwrap();
+
+    let (runner, _mock) = piforge::eval::Runner::new_mock(8, false);
+    let vs = runner
+        .run_all(root.to_str().unwrap(), |_| ())
+        .await
+        .expect("run_all");
+    assert_eq!(vs.len(), 1);
+    assert!(!vs[0].pass_);
+    assert!(
+        vs[0].notes.contains("malformed gold:"),
+        "notes must be overwritten to malformed gold, got {:?}",
+        vs[0].notes
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}

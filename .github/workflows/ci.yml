@@ -20,8 +20,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
-      - name: Install Linux hw deps (i2c-tools)
-        run: sudo apt-get update && sudo apt-get install -y i2c-tools
       - name: Format check
         run: cargo fmt --all -- --check
       - name: Clippy
@@ -35,6 +33,13 @@ jobs:
         # and the edge_label/since_us/bus_num_from_path/resolve_chip decoders.
         # Scope capture boundedness stays a manual Pi gate (off-Pi-untestable).
         run: cargo test --features hw --lib --tests
+      - name: Build (eval binary)
+        run: cargo build --release --bin piforge-eval
+      - name: Mock eval parity check
+        run: |
+          ./target/release/piforge-eval --mock --config ../piforge.toml.example --cases ../eval/cases | tee /tmp/out.txt
+          grep -q "DECISION: BUILD_LOCAL" /tmp/out.txt
+          grep -q "passed=13" /tmp/out.txt
 
   # Cross-compile the real hw binary to the Pi 5 target.
   cross-compile-arm64:

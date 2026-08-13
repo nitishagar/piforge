@@ -283,6 +283,7 @@ fn jitter_up_to(max: Duration) -> Duration {
 }
 
 /// Input to a chat completion.
+#[derive(Clone)]
 pub struct ChatRequest {
     pub messages: Vec<ChatMessage>,
     pub tools: Vec<Tool>,

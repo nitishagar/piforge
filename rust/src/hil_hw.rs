@@ -23,17 +23,33 @@ use crate::broker::{ThrottledReader, UvReading};
 use crate::hil::{self, Gate, Tool, ToolResult};
 
 /// Resolve the gpiochip name for the Pi 5 40-pin header.
+///
+/// Current Pi OS names the RP1 40-pin chip `gpiochip0` and keeps `gpiochip4` as
+/// a compat symlink. `gpiod::Chip::new` rejects the symlink ("not a character
+/// device"), so we canonicalize `/dev/<name>` when it exists. Configured names
+/// that do not exist on this host (macOS / CI) are returned verbatim.
 pub fn resolve_chip(configured: &str) -> Result<String, String> {
     if !configured.is_empty() {
-        return Ok(configured.into());
+        return Ok(canonical_chip_name(configured).unwrap_or_else(|_| configured.into()));
     }
-    // Pi 5 => gpiochip4; fall back to gpiochip0 for older boards.
+    // Prefer the historic Pi 5 name; follow symlink / fall back to gpiochip0.
     for name in &["gpiochip4", "gpiochip0"] {
-        if gpiod::Chip::new(*name).is_ok() {
-            return Ok((*name).into());
+        let candidate = canonical_chip_name(name).unwrap_or_else(|_| (*name).into());
+        if gpiod::Chip::new(&candidate).is_ok() {
+            return Ok(candidate);
         }
     }
     Err("no gpiochip found (set hardware.gpiochip in config)".into())
+}
+
+fn canonical_chip_name(name: &str) -> Result<String, String> {
+    let path = PathBuf::from("/dev").join(name.trim_start_matches("/dev/"));
+    let canon = std::fs::canonicalize(&path).map_err(|e| e.to_string())?;
+    canon
+        .file_name()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| format!("gpiochip path {} has no file name", canon.display()))
 }
 
 // ---------------- GPIO ----------------

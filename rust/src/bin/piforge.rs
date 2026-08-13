@@ -22,6 +22,13 @@ struct Args {
     /// Single task to run (non-interactive).
     #[arg(long)]
     task: Option<String>,
+    /// Execute one HIL tool and print JSON (skips the LLM). For operator /
+    /// Class-R checks. Unknown names error; hardware resolve still runs first.
+    #[arg(long)]
+    tool: Option<String>,
+    /// JSON object of arguments for `--tool`. Default empty object.
+    #[arg(long, default_value = "{}")]
+    args: String,
 }
 
 #[tokio::main]
@@ -30,6 +37,33 @@ async fn main() -> Result<()> {
     let cfg = config::load(&args.config)?;
     cfg.validate()?;
 
+    if args.task.is_some() && args.tool.is_some() {
+        anyhow::bail!("--task and --tool are mutually exclusive");
+    }
+    // I19: clap does not mark --task required; missing both still bails here.
+    if args.task.is_none() && args.tool.is_none() {
+        anyhow::bail!("no --task given; interactive mode not yet implemented");
+    }
+
+    // Resolve the toolbox (chip + i2c bus on hw) before talking to the LLM so a
+    // missing `/dev/i2c-1` is a pre-loop error listing available buses (I14).
+    let tools: ToolVec = build_tools(&cfg, Broker::stdin_confirmer())?;
+
+    if let Some(name) = args.tool {
+        let tool = tools
+            .iter()
+            .find(|t| t.name() == name)
+            .ok_or_else(|| anyhow::anyhow!("unknown tool {name}"))?;
+        let parsed: serde_json::Value = serde_json::from_str(&args.args)
+            .map_err(|e| anyhow::anyhow!("--args must be a JSON object: {e}"))?;
+        let result = tool.execute(&parsed).await;
+        println!("{}", result.to_json_string());
+        if !result.ok {
+            anyhow::bail!("{name} returned ok=false");
+        }
+        return Ok(());
+    }
+
     let client = Arc::new(Client::new(&cfg.server)?);
     client.health_check().await.map_err(|e| {
         anyhow::anyhow!(
@@ -37,18 +71,13 @@ async fn main() -> Result<()> {
         )
     })?;
 
-    let tools: ToolVec = build_tools(&cfg, Broker::stdin_confirmer())?;
-
     let agent = Agent::new(
         client,
         tools,
         cfg.agent.max_turns,
         cfg.agent.telemetry_preload,
     );
-    let task = match args.task {
-        Some(t) => t,
-        None => anyhow::bail!("no --task given; interactive mode not yet implemented"),
-    };
+    let task = args.task.expect("checked above");
     let res = agent.run(&task, |s| println!("{s}")).await?;
     eprintln!(
         "\n[turns={} cache_hit={:.0}% prompt_tok={} completion_tok={}]",

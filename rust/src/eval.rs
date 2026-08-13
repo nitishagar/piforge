@@ -62,23 +62,26 @@ pub struct Runner {
     client: Option<std::sync::Arc<dyn LlmClient>>,
     mock: Option<std::sync::Arc<MockProvider>>,
     max_turns: u32,
+    preload: bool,
 }
 
 impl Runner {
-    pub fn new(client: std::sync::Arc<dyn LlmClient>, max_turns: u32) -> Self {
+    pub fn new(client: std::sync::Arc<dyn LlmClient>, max_turns: u32, preload: bool) -> Self {
         Self {
             client: Some(client),
             mock: None,
             max_turns,
+            preload,
         }
     }
-    pub fn new_mock(max_turns: u32) -> (Self, std::sync::Arc<MockProvider>) {
+    pub fn new_mock(max_turns: u32, preload: bool) -> (Self, std::sync::Arc<MockProvider>) {
         let mock = std::sync::Arc::new(MockProvider::new());
         (
             Self {
                 client: None,
                 mock: Some(mock.clone()),
                 max_turns,
+                preload,
             },
             mock,
         )
@@ -151,14 +154,18 @@ impl Runner {
 
         let res = match &self.client {
             Some(client) => {
-                let agent = Agent::new(client.clone(), tools, self.max_turns);
+                let agent = Agent::new(client.clone(), tools, self.max_turns, self.preload);
                 agent.run(&c.symptom, |_| ()).await
             }
             None => {
                 let mock = self.mock.clone().unwrap();
                 mock.load(script(&c.id)).await;
-                let agent =
-                    Agent::new(mock as std::sync::Arc<dyn LlmClient>, tools, self.max_turns);
+                let agent = Agent::new(
+                    mock as std::sync::Arc<dyn LlmClient>,
+                    tools,
+                    self.max_turns,
+                    self.preload,
+                );
                 agent.run(&c.symptom, |_| ()).await
             }
         };

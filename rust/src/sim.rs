@@ -8,8 +8,8 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::broker::ThrottledReader;
-use crate::hil::{Gate, Tool, ToolResult};
+use crate::broker::{ThrottledReader, UvReading};
+use crate::hil::{self, Gate, Tool, ToolResult};
 
 /// Simulated board state, loaded from a Case fixture's Setup.
 pub struct State {
@@ -167,9 +167,13 @@ use std::sync::Arc;
 
 // ---- telemetry adapter for the broker gate ----
 impl ThrottledReader for State {
-    fn under_voltage_active(&self) -> (bool, bool) {
+    fn under_voltage_active(&self) -> UvReading {
         let s = self.inner.lock();
-        (s.throttled & (1 << 0) != 0, s.throttled & (1 << 16) != 0)
+        UvReading {
+            known: true,
+            now: s.throttled & (1 << 0) != 0,
+            since: s.throttled & (1 << 16) != 0,
+        }
     }
 }
 
@@ -189,7 +193,7 @@ impl Tool for InventoryTool {
         "hardware_inventory"
     }
     fn description(&self) -> &str {
-        "List detected hardware: I2C devices, GPIO pins, board model. Call first."
+        "List detected hardware: gpiochips, I2C devices, board model. Call first."
     }
     fn parameters(&self) -> Value {
         json!({"type":"object","properties":{}})
@@ -276,15 +280,13 @@ impl Tool for TelemetryTool {
             }
             _ => {
                 let uv = s.throttled & (1 << 0) != 0 || s.throttled & (1 << 16) != 0;
-                let mut out = json!({
-                    "throttled_raw": format!("0x{:x}", s.throttled),
-                    "under_voltage": uv,
-                    "cpu_temp": "temp=48.5'C",
-                    "telemetry_known": true,
-                });
-                if !s.dmesg_tail.is_empty() {
-                    out["dmesg_tail"] = json!(s.dmesg_tail.join("\n"));
-                }
+                let dmesg = if s.dmesg_tail.is_empty() {
+                    None
+                } else {
+                    Some(s.dmesg_tail.join("\n"))
+                };
+                let out =
+                    hil::telemetry_snapshot(Some(s.throttled), "temp=48.5'C", dmesg.as_deref());
                 let notice = if uv {
                     Some("UNDERVOLTAGE detected — STOP before adding load.".into())
                 } else {
@@ -490,7 +492,7 @@ impl Tool for ScopeTool {
         "Capture GPIO edge events over a window (Class R)."
     }
     fn parameters(&self) -> Value {
-        json!({"type":"object","properties":{"pin":{"type":"integer"},"duration":{"type":"number"}},"required":["pin","duration"]})
+        json!({"type":"object","properties":{"pin":{"type":"integer"},"duration":{"type":"number","description":"capture window in milliseconds (max 5000)"}},"required":["pin","duration"]})
     }
     async fn execute(&self, args: &Value) -> ToolResult {
         let pin = args.get("pin").and_then(|v| v.as_i64()).unwrap_or(0) as i32;

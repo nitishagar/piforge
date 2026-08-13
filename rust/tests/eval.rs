@@ -130,7 +130,7 @@ async fn workspace_dirs_are_unique_across_cases() {
     )
     .unwrap();
 
-    let (runner, _mock) = piforge::eval::Runner::new_mock(8);
+    let (runner, _mock) = piforge::eval::Runner::new_mock(8, false);
     let vs = runner
         .run_all(root.to_str().unwrap(), |_| ())
         .await
@@ -180,7 +180,7 @@ async fn malformed_gold_overwrites_notes() {
     )
     .unwrap();
 
-    let (runner, _mock) = piforge::eval::Runner::new_mock(8);
+    let (runner, _mock) = piforge::eval::Runner::new_mock(8, false);
     let vs = runner
         .run_all(root.to_str().unwrap(), |_| ())
         .await

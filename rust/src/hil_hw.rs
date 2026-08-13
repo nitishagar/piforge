@@ -1,7 +1,8 @@
 //! Real hardware tools, Linux-only, behind the `hw` feature.
 //! - GPIO get/set + scope (edge events): the `gpiod` crate (pure Rust, no
 //!   libgpiod C dep; talks to /dev/gpiochipN directly).
-//! - I2C read: `linux-embedded-hal` (nix-based ioctl on /dev/i2c-N).
+//! - I2C scan/detect/read: in-process `nix` ioctl on `/dev/i2c-N` (SMBus QUICK
+//!   scan + one `I2C_RDWR` write-reg+read; no `i2c-tools` PATH dependency).
 //! - Telemetry (vcgencmd get_throttled decode): shell out (no Rust lib; low freq).
 //!
 //! Build with `--features hw` on Linux (the Pi). Off-Linux or without the
@@ -10,14 +11,16 @@
 
 use parking_lot::Mutex;
 use std::collections::HashMap;
-use std::os::unix::io::FromRawFd;
-use std::time::Duration;
+use std::os::unix::io::{AsRawFd, FromRawFd};
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use serde_json::{json, Value};
 
-use crate::broker::ThrottledReader;
-use crate::hil::{Gate, Tool, ToolResult};
+use crate::broker::{ThrottledReader, UvReading};
+use crate::hil::{self, Gate, Tool, ToolResult};
 
 /// Resolve the gpiochip name for the Pi 5 40-pin header.
 pub fn resolve_chip(configured: &str) -> Result<String, String> {
@@ -148,9 +151,9 @@ impl Tool for GpioTool {
 // kernel's GPIO_V2 line-request ioctls (input + both edges) to obtain a line fd,
 // then `ppoll` that fd with a duration-relative deadline. ppoll bounds the
 // capture at the syscall level (returns on timeout) with zero thread leak, and a
-// stray SIGCHLD from the agent's own i2cdetect/vcgencmd/i2cget shell-outs (or
-// tokio child reaping) surfaces as EINTR and is retried against the remaining
-// deadline rather than truncating a capture on a *toggling* pin. The GPIO get/set
+// stray SIGCHLD from `vcgencmd`/`dmesg` (or tokio child reaping) surfaces as
+// EINTR and is retried against the remaining deadline rather than truncating a
+// capture on a *toggling* pin. The GPIO get/set
 // path stays on gpiod's `Lines` — those calls return promptly; only `read_event`
 // blocks. The GPIO_V2 structs/constants/ioctl-numbers are authored in-tree
 // (below) — they are NOT in nix or libc; nix contributes only the
@@ -290,7 +293,7 @@ impl Tool for ScopeTool {
         "scope"
     }
     fn description(&self) -> &str {
-        "Capture GPIO edge events over a window (a logic-scope time series). Class R."
+        "Capture GPIO edge events over a window (Class R)."
     }
     fn parameters(&self) -> Value {
         json!({"type":"object","properties":{"pin":{"type":"integer"},"duration":{"type":"number","description":"capture window in milliseconds (max 5000)"}},"required":["pin","duration"]})
@@ -483,46 +486,252 @@ fn capture_edges(
     (events, notice)
 }
 
-// ---------------- I2C ----------------
+// ---------------- I2C (in-process ioctl on /dev/i2c-N) ----------------
+//
+// Scan uses SMBus QUICK (i2cdetect -y). I2C_TIMEOUT=10 (100 ms/transfer, Linux
+// 10 ms units) plus a 2 s Instant check between probes inside spawn_blocking.
+// The async side joins that task (never tokio::time::timeout, which would
+// abandon the JoinHandle while ioctl still holds the adapter). Read is one
+// I2C_RDWR write-reg + read-N. A shared Mutex serializes I2cTool + InventoryTool.
 
-pub struct I2cTool {
-    /// Parsed bus index (e.g. "1") cached from the configured `/dev/i2c-N`
-    /// path at construction so the config knob is honored in every
-    /// `i2cdetect`/`i2cget` shell-out, not hardcoded.
-    bus_num: String,
-    gate: Option<std::sync::Arc<dyn Gate>>,
+mod i2c_ioctl {
+    pub const I2C_M_RD: u16 = 0x0001;
+    pub const I2C_SMBUS_WRITE: u8 = 0;
+    pub const I2C_SMBUS_QUICK: i32 = 0;
+
+    #[repr(C)]
+    pub struct I2cSmbusIoctlData {
+        pub read_write: u8,
+        pub command: u8,
+        pub size: i32,
+        pub data: *mut u8,
+    }
+
+    #[repr(C)]
+    pub struct I2cMsg {
+        pub addr: u16,
+        pub flags: u16,
+        pub len: u16,
+        pub buf: *mut u8,
+    }
+
+    #[repr(C)]
+    pub struct I2cRdwrIoctlData {
+        pub msgs: *mut I2cMsg,
+        pub nmsgs: u32,
+    }
+
+    nix::ioctl_write_int_bad!(i2c_timeout, 0x0702);
+    nix::ioctl_write_int_bad!(i2c_slave, 0x0703);
+    nix::ioctl_readwrite_bad!(i2c_smbus, 0x0720, I2cSmbusIoctlData);
+    nix::ioctl_readwrite_bad!(i2c_rdwr, 0x0707, I2cRdwrIoctlData);
 }
-impl I2cTool {
-    pub fn new(
-        bus_path: impl Into<String>,
-        gate: Option<std::sync::Arc<dyn Gate>>,
-    ) -> std::sync::Arc<Self> {
-        let bus_path = bus_path.into();
-        std::sync::Arc::new(Self {
-            bus_num: bus_num_from_path(&bus_path),
-            gate,
+
+/// Shared in-process helper for `/dev/i2c-N`. Construction does not open the
+/// node (`schema()` / tests use a dummy path).
+pub struct I2cAdapter {
+    path: PathBuf,
+    lock: Mutex<()>,
+}
+
+impl I2cAdapter {
+    pub fn new(path: impl Into<PathBuf>) -> Arc<Self> {
+        Arc::new(Self {
+            path: path.into(),
+            lock: Mutex::new(()),
         })
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    async fn scan(self: &Arc<Self>) -> Result<(Vec<u8>, Option<String>), String> {
+        let this = Arc::clone(self);
+        tokio::task::spawn_blocking(move || {
+            let _g = this.lock.lock();
+            scan_bus_blocking(&this.path)
+        })
+        .await
+        .map_err(|e| format!("i2c scan task: {e}"))?
+    }
+
+    async fn detect(self: &Arc<Self>, addr: u16) -> Result<bool, String> {
+        let this = Arc::clone(self);
+        tokio::task::spawn_blocking(move || {
+            let _g = this.lock.lock();
+            detect_blocking(&this.path, addr)
+        })
+        .await
+        .map_err(|e| format!("i2c detect task: {e}"))?
+    }
+
+    async fn read(self: &Arc<Self>, addr: u16, reg: u8, n: usize) -> Result<Vec<u8>, String> {
+        let this = Arc::clone(self);
+        tokio::task::spawn_blocking(move || {
+            let _g = this.lock.lock();
+            read_blocking(&this.path, addr, reg, n)
+        })
+        .await
+        .map_err(|e| format!("i2c read task: {e}"))?
     }
 }
 
-/// Extract the bus index from a `/dev/i2c-N` path so the config knob is
-/// honored end-to-end, not cosmetically. `"/dev/i2c-1"` → `"1"`,
-/// `"/dev/i2c-10"` → `"10"`, `"1"` → `"1"`. Falls back to `"1"` (the Pi default)
-/// when the path has no trailing digits, so a malformed config degrades to the
-/// historical behavior rather than panicking.
-pub fn bus_num_from_path(path: &str) -> String {
-    let digits: String = path
-        .chars()
+fn trailing_digits(path: &str) -> String {
+    path.chars()
         .rev()
         .take_while(|c| c.is_ascii_digit())
         .collect::<Vec<_>>()
         .into_iter()
         .rev()
-        .collect();
+        .collect()
+}
+
+/// Extract the bus index from a `/dev/i2c-N` path. Empty trailing digits is
+/// `Err`, not a silent fallback to `"1"`.
+pub fn bus_num_from_path(path: &str) -> Result<String, String> {
+    let digits = trailing_digits(path);
     if digits.is_empty() {
-        "1".to_string()
+        Err(format!(
+            "I2C path {path:?} has no trailing decimal bus index"
+        ))
     } else {
-        digits
+        Ok(digits)
+    }
+}
+
+fn list_i2c_dev_names() -> Vec<String> {
+    let mut names = Vec::new();
+    if let Ok(rd) = std::fs::read_dir("/dev") {
+        for e in rd.flatten() {
+            let s = e.file_name().to_string_lossy().into_owned();
+            if s.starts_with("i2c-") {
+                names.push(s);
+            }
+        }
+    }
+    names.sort();
+    names
+}
+
+/// Fail-closed bus resolve: trailing digits + `Path::exists`. Missing node
+/// lists `/dev/i2c-*`. Call from hw `build_tools` before constructing tools.
+/// Existence is not checked in `config.validate()` (macOS has no node).
+pub fn resolve_i2c_bus(configured: &str) -> Result<PathBuf, String> {
+    let available = || {
+        let names = list_i2c_dev_names();
+        if names.is_empty() {
+            "(none)".into()
+        } else {
+            names.join(", ")
+        }
+    };
+    if bus_num_from_path(configured).is_err() {
+        return Err(format!(
+            "I2C bus {configured:?} has no trailing decimal index; available: {}",
+            available()
+        ));
+    }
+    let path = PathBuf::from(configured);
+    if !path.exists() {
+        return Err(format!(
+            "I2C bus {configured} not found; available: {}",
+            available()
+        ));
+    }
+    Ok(path)
+}
+
+fn open_i2c(path: &Path) -> Result<std::fs::File, String> {
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .map_err(|e| format!("open {}: {e}", path.display()))?;
+    unsafe {
+        i2c_ioctl::i2c_timeout(file.as_raw_fd(), 10).map_err(|e| format!("I2C_TIMEOUT: {e}"))?;
+    }
+    Ok(file)
+}
+
+fn smbus_quick(file: &std::fs::File, addr: u16) -> bool {
+    let fd = file.as_raw_fd();
+    if unsafe { i2c_ioctl::i2c_slave(fd, addr as _) }.is_err() {
+        return false;
+    }
+    let mut data = i2c_ioctl::I2cSmbusIoctlData {
+        read_write: i2c_ioctl::I2C_SMBUS_WRITE,
+        command: 0,
+        size: i2c_ioctl::I2C_SMBUS_QUICK,
+        data: std::ptr::null_mut(),
+    };
+    unsafe { i2c_ioctl::i2c_smbus(fd, &mut data) }.is_ok()
+}
+
+fn scan_bus_blocking(path: &Path) -> Result<(Vec<u8>, Option<String>), String> {
+    let file = open_i2c(path)?;
+    let start = Instant::now();
+    let mut found = Vec::new();
+    let mut timed_out = false;
+    for addr in 0x08u8..=0x77 {
+        if smbus_quick(&file, addr as u16) {
+            found.push(addr);
+        }
+        if start.elapsed() >= Duration::from_secs(2) {
+            timed_out = true;
+            break;
+        }
+    }
+    let notice = if timed_out {
+        Some("scan timed out".into())
+    } else if found.len() > 40 {
+        Some("many addresses responded — likely SDA/SCL shorted to power; STOP".into())
+    } else if found.is_empty() {
+        Some("no devices — check dtparam=i2c_arm=on, wiring, pull-ups".into())
+    } else {
+        None
+    };
+    Ok((found, notice))
+}
+
+fn detect_blocking(path: &Path, addr: u16) -> Result<bool, String> {
+    let file = open_i2c(path)?;
+    Ok(smbus_quick(&file, addr))
+}
+
+fn read_blocking(path: &Path, addr: u16, reg: u8, n: usize) -> Result<Vec<u8>, String> {
+    let file = open_i2c(path)?;
+    let mut reg_buf = [reg];
+    let mut data = vec![0u8; n];
+    let mut msgs = [
+        i2c_ioctl::I2cMsg {
+            addr,
+            flags: 0,
+            len: 1,
+            buf: reg_buf.as_mut_ptr(),
+        },
+        i2c_ioctl::I2cMsg {
+            addr,
+            flags: i2c_ioctl::I2C_M_RD,
+            len: n as u16,
+            buf: data.as_mut_ptr(),
+        },
+    ];
+    let mut ioctl_data = i2c_ioctl::I2cRdwrIoctlData {
+        msgs: msgs.as_mut_ptr(),
+        nmsgs: 2,
+    };
+    unsafe { i2c_ioctl::i2c_rdwr(file.as_raw_fd(), &mut ioctl_data) }
+        .map_err(|e| format!("read 0x{addr:02x} reg 0x{reg:02x}: {e}"))?;
+    Ok(data)
+}
+
+pub struct I2cTool {
+    bus: Arc<I2cAdapter>,
+}
+impl I2cTool {
+    pub fn new(bus: Arc<I2cAdapter>) -> Arc<Self> {
+        Arc::new(Self { bus })
     }
 }
 
@@ -532,7 +741,7 @@ impl Tool for I2cTool {
         "i2c"
     }
     fn description(&self) -> &str {
-        "I2C scan/detect/read via /dev/i2c-N. Returns structured values with units."
+        "I2C scan/detect/read. Returns structured values with units."
     }
     fn parameters(&self) -> Value {
         json!({"type":"object","properties":{"action":{"type":"string","enum":["scan","read","detect"]},"address":{"type":"integer"},"register":{"type":"integer"},"length":{"type":"integer"}},"required":["action"]})
@@ -543,163 +752,68 @@ impl Tool for I2cTool {
             .and_then(|v| v.as_str())
             .unwrap_or("scan");
         let addr = args.get("address").and_then(|v| v.as_i64()).unwrap_or(0) as u16;
-        // Shell out to i2c-tools (i2cdetect/i2cget) — they're present on Pi OS and
-        // handle the SMBus quick-read + register-read semantics robustly. A pure
-        // nix-ioctl path is possible but reinvents i2c-tools; defer.
         match action {
-            "scan" => {
-                let out = tokio::process::Command::new("i2cdetect")
-                    .args(["-y", self.bus_num.as_str()])
-                    .output()
-                    .await;
-                match out {
-                    Ok(o) if o.status.success() => {
-                        let txt = String::from_utf8_lossy(&o.stdout);
-                        let found = parse_i2cdetect(&txt);
-                        let notice = if found.len() > 40 {
-                            Some(
-                                "many addresses responded — likely SDA/SCL shorted to power; STOP"
-                                    .into(),
-                            )
-                        } else if found.is_empty() {
-                            Some("no devices — check dtparam=i2c_arm=on, wiring, pull-ups".into())
-                        } else {
-                            None
-                        };
-                        let hex: Vec<String> = found.iter().map(|a| format!("0x{a:02x}")).collect();
-                        ToolResult {
-                            tool: "i2c".into(),
-                            ok: true,
-                            value: Some(json!({"devices":hex,"count":found.len()})),
-                            unit: Some("7-bit addr".into()),
-                            error: None,
-                            notice,
-                        }
+            "scan" => match self.bus.scan().await {
+                Ok((found, notice)) => {
+                    let hex: Vec<String> = found.iter().map(|a| format!("0x{a:02x}")).collect();
+                    ToolResult {
+                        tool: "i2c".into(),
+                        ok: true,
+                        value: Some(json!({"devices":hex,"count":found.len()})),
+                        unit: Some("7-bit addr".into()),
+                        error: None,
+                        notice,
                     }
-                    Ok(o) => ToolResult::err(
-                        "i2c",
-                        format!(
-                            "i2cdetect exited {}: {}",
-                            o.status,
-                            String::from_utf8_lossy(&o.stderr)
-                        ),
-                    ),
-                    Err(e) => ToolResult::err(
-                        "i2c",
-                        format!("run i2cdetect: {e} (is i2c-tools installed?)"),
-                    ),
                 }
-            }
-            "detect" => {
-                let out = tokio::process::Command::new("i2cdetect")
-                    .args(["-y", self.bus_num.as_str()])
-                    .output()
-                    .await;
-                let Ok(o) = out else {
-                    return ToolResult::err("i2c", "i2cdetect failed");
-                };
-                let txt = String::from_utf8_lossy(&o.stdout);
-                let found = parse_i2cdetect(&txt);
-                if found.contains(&(addr as i32)) {
-                    ToolResult::ok(
-                        "i2c",
-                        json!({"address":format!("0x{addr:02x}"),"present":true}),
-                    )
-                } else {
-                    ToolResult::err("i2c", format!("no device at 0x{addr:02x}"))
-                }
-            }
+                Err(e) => ToolResult::err("i2c", e),
+            },
+            "detect" => match self.bus.detect(addr).await {
+                Ok(true) => ToolResult::ok(
+                    "i2c",
+                    json!({"address":format!("0x{addr:02x}"),"present":true}),
+                ),
+                Ok(false) => ToolResult::err("i2c", format!("no device at 0x{addr:02x}")),
+                Err(e) => ToolResult::err("i2c", e),
+            },
             "read" => {
                 let reg = args.get("register").and_then(|v| v.as_i64()).unwrap_or(0) as u8;
                 let n = args
                     .get("length")
                     .and_then(|v| v.as_i64())
                     .unwrap_or(1)
-                    .max(1)
-                    .min(32) as usize;
-                // i2cdump -y 1 <addr> b <reg> reads one byte per call; for N bytes we loop.
-                // For MVP simplicity read N bytes starting at reg via repeated i2cget.
-                let mut bytes = Vec::with_capacity(n);
-                let addr_hex = format!("0x{addr:02x}");
-                for i in 0..n {
-                    let r = reg.wrapping_add(i as u8);
-                    // i2cget expects the address in hex (e.g. 0x76), not decimal.
-                    let out = tokio::process::Command::new("i2cget")
-                        .args([
-                            "-y",
-                            self.bus_num.as_str(),
-                            &addr_hex,
-                            &format!("0x{r:02x}"),
-                        ])
-                        .output()
-                        .await;
-                    match out {
-                        Ok(o) if o.status.success() => {
-                            let t = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                            let v = u8::from_str_radix(t.trim_start_matches("0x"), 16).unwrap_or(0);
-                            bytes.push(v);
+                    .clamp(1, 32) as usize;
+                match self.bus.read(addr, reg, n).await {
+                    Ok(bytes) => {
+                        let raw_hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+                        let mut out = json!({
+                            "address":format!("0x{addr:02x}"),
+                            "register":format!("0x{reg:02x}"),
+                            "raw_hex":raw_hex,
+                            "raw_dec":bytes,
+                        });
+                        if bytes.len() == 2 {
+                            let be = u16::from_be_bytes([bytes[0], bytes[1]]);
+                            let le = u16::from_le_bytes([bytes[0], bytes[1]]);
+                            out["be_uint16"] = json!(be);
+                            out["le_uint16"] = json!(le);
                         }
-                        _ => bytes.push(0),
+                        ToolResult::ok_unit("i2c", out, "bytes (see datasheet for scaling)")
                     }
+                    Err(e) => ToolResult::err("i2c", e),
                 }
-                let raw_hex: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
-                let mut out = json!({
-                    "address":format!("0x{addr:02x}"),
-                    "register":format!("0x{reg:02x}"),
-                    "raw_hex":raw_hex,
-                    "raw_dec":bytes,
-                });
-                // 2-byte reads: surface both endian interpretations (parity with Go).
-                if bytes.len() == 2 {
-                    let be = u16::from_be_bytes([bytes[0], bytes[1]]);
-                    let le = u16::from_le_bytes([bytes[0], bytes[1]]);
-                    out["be_uint16"] = json!(be);
-                    out["le_uint16"] = json!(le);
-                }
-                ToolResult::ok_unit("i2c", out, "bytes (see datasheet for scaling)")
             }
             other => ToolResult::err("i2c", format!("unknown action {other}")),
         }
     }
 }
 
-/// Parse `i2cdetect -y 1` output into present 7-bit addresses.
-fn parse_i2cdetect(text: &str) -> Vec<i32> {
-    let mut found = vec![];
-    for line in text.lines() {
-        // Lines look like:  "40: 40 41 42 43 44 45 46 47 ..."
-        if let Some((row_hex, _)) = line.split_once(':') {
-            if let Ok(row) = u8::from_str_radix(row_hex.trim(), 16) {
-                for tok in line.split(':').nth(1).unwrap_or("").split_whitespace() {
-                    if tok == "UU" {
-                        continue;
-                    }
-                    if let Ok(col) = u8::from_str_radix(tok, 16) {
-                        found.push((row + col) as i32);
-                    }
-                }
-            }
-        }
-    }
-    found
-}
-
 // ---------------- Telemetry (vcgencmd) ----------------
 
-pub struct TelemetryTool {
-    last: Mutex<ThrottledBits>,
-}
-#[derive(Default, Clone, Copy)]
-struct ThrottledBits {
-    now: bool,
-    since: bool,
-}
+pub struct TelemetryTool;
 
 impl TelemetryTool {
-    pub fn new() -> std::sync::Arc<Self> {
-        std::sync::Arc::new(Self {
-            last: Mutex::new(ThrottledBits::default()),
-        })
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self)
     }
 
     fn read_throttled() -> Option<u64> {
@@ -716,6 +830,42 @@ impl TelemetryTool {
         let s = s.trim_start_matches("0x").trim_start_matches("0X");
         u64::from_str_radix(s, 16).ok()
     }
+
+    fn read_temp() -> String {
+        let o = std::process::Command::new("vcgencmd")
+            .arg("measure_temp")
+            .output();
+        match o {
+            Ok(x) if x.status.success() => {
+                let t = String::from_utf8_lossy(&x.stdout).trim().to_string();
+                if t.is_empty() {
+                    "N/A".into()
+                } else {
+                    t
+                }
+            }
+            _ => "N/A".into(),
+        }
+    }
+
+    fn read_dmesg_tail() -> Option<String> {
+        let o = std::process::Command::new("dmesg").output().ok()?;
+        if !o.status.success() {
+            return None;
+        }
+        let s = String::from_utf8_lossy(&o.stdout);
+        let mut lines: Vec<&str> = s.lines().rev().take(20).collect();
+        if lines.is_empty() {
+            return None;
+        }
+        lines.reverse();
+        let joined = lines.join("\n");
+        if joined.is_empty() {
+            None
+        } else {
+            Some(joined)
+        }
+    }
 }
 
 #[async_trait]
@@ -724,7 +874,7 @@ impl Tool for TelemetryTool {
         "telemetry"
     }
     fn description(&self) -> &str {
-        "Read Pi health: temp, volts, decoded get_throttled bitmask, dmesg tail."
+        "Read Pi health telemetry: temp, volts, throttled bitmask, dmesg tail."
     }
     fn parameters(&self) -> Value {
         json!({"type":"object","properties":{"action":{"type":"string","enum":["snapshot","throttled","temp"]}},"required":["action"]})
@@ -736,72 +886,152 @@ impl Tool for TelemetryTool {
             .unwrap_or("snapshot");
         match action {
             "temp" => {
-                let o = std::process::Command::new("vcgencmd")
-                    .arg("measure_temp")
-                    .output();
-                let t = match o {
-                    Ok(x) => String::from_utf8_lossy(&x.stdout).trim().to_string(),
-                    Err(_) => "temp=N/A".into(),
-                };
+                let t = Self::read_temp();
                 ToolResult::ok_unit("telemetry", json!({"cpu_temp":t}), "degC")
             }
-            "throttled" => {
-                let val = Self::read_throttled().unwrap_or(0);
-                let bits = ThrottledBits {
-                    now: val & (1 << 0) != 0,
-                    since: val & (1 << 16) != 0,
-                };
-                *self.last.lock() = bits;
-                let notice = if bits.now || bits.since {
-                    Some(
-                        "UNDERVOLTAGE detected — STOP before adding load; use a 5V/3A+ PSU.".into(),
-                    )
+            "throttled" => match Self::read_throttled() {
+                Some(val) => {
+                    let now = val & (1 << 0) != 0;
+                    let since = val & (1 << 16) != 0;
+                    let notice = if now || since {
+                        Some(
+                            "UNDERVOLTAGE detected — STOP before adding load; use a 5V/3A+ PSU."
+                                .into(),
+                        )
+                    } else {
+                        None
+                    };
+                    ToolResult {
+                        tool: "telemetry".into(),
+                        ok: true,
+                        value: Some(
+                            json!({"raw":format!("0x{val:x}"),"decoded":{"under_voltage_now":now,"currently_throttled_now":val&(1<<2)!=0,"under_voltage_since_boot":since,"throttled_since_boot":val&(1<<18)!=0}}),
+                        ),
+                        unit: None,
+                        error: None,
+                        notice,
+                    }
+                }
+                None => ToolResult {
+                    tool: "telemetry".into(),
+                    ok: true,
+                    value: Some(json!({"raw": Value::Null, "decoded": Value::Null})),
+                    unit: None,
+                    error: None,
+                    notice: None,
+                },
+            },
+            _ => {
+                let throttled = Self::read_throttled();
+                let cpu_temp = Self::read_temp();
+                let dmesg = Self::read_dmesg_tail();
+                let uv = matches!(
+                    throttled,
+                    Some(val) if val & (1 << 0) != 0 || val & (1 << 16) != 0
+                );
+                let out = hil::telemetry_snapshot(throttled, &cpu_temp, dmesg.as_deref());
+                let notice = if uv {
+                    Some("UNDERVOLTAGE detected — STOP before adding load.".into())
                 } else {
                     None
                 };
                 ToolResult {
                     tool: "telemetry".into(),
                     ok: true,
-                    value: Some(
-                        json!({"raw":format!("0x{val:x}"),"decoded":{"under_voltage_now":bits.now,"currently_throttled_now":val&(1<<2)!=0,"under_voltage_since_boot":bits.since,"throttled_since_boot":val&(1<<18)!=0}}),
-                    ),
+                    value: Some(out),
                     unit: None,
                     error: None,
                     notice,
                 }
-            }
-            _ => {
-                let val = Self::read_throttled().unwrap_or(0);
-                let uv = val & (1 << 0) != 0 || val & (1 << 16) != 0;
-                let mut out = json!({"throttled_raw":format!("0x{val:x}"),"under_voltage":uv});
-                if uv {
-                    out["notice"] = json!("UNDERVOLTAGE detected — STOP before adding load.");
-                }
-                ToolResult::ok("telemetry", out)
             }
         }
     }
 }
 
 impl ThrottledReader for TelemetryTool {
-    fn under_voltage_active(&self) -> (bool, bool) {
-        let val = Self::read_throttled().unwrap_or(0);
-        (val & (1 << 0) != 0, val & (1 << 16) != 0)
+    fn under_voltage_active(&self) -> UvReading {
+        match Self::read_throttled() {
+            Some(val) => UvReading {
+                known: true,
+                now: val & (1 << 0) != 0,
+                since: val & (1 << 16) != 0,
+            },
+            None => UvReading {
+                known: false,
+                now: false,
+                since: false,
+            },
+        }
     }
 }
 
 // ---------------- Inventory ----------------
 
 pub struct InventoryTool {
-    /// I2C bus index (e.g. "1") for the inventory `i2cdetect` call.
-    bus_num: String,
+    bus: Arc<I2cAdapter>,
 }
 impl InventoryTool {
-    pub fn new(bus_num: impl Into<String>) -> std::sync::Arc<Self> {
-        std::sync::Arc::new(Self {
-            bus_num: bus_num.into(),
-        })
+    pub fn new(bus: Arc<I2cAdapter>) -> Arc<Self> {
+        Arc::new(Self { bus })
     }
+}
+
+fn gpiochip_names() -> Vec<String> {
+    let mut names = Vec::new();
+    if let Ok(rd) = std::fs::read_dir("/dev") {
+        for e in rd.flatten() {
+            let s = e.file_name().to_string_lossy().into_owned();
+            if s.starts_with("gpiochip") {
+                names.push(s);
+            }
+        }
+    }
+    names.sort();
+    names
+}
+
+fn one_wire_ids() -> Vec<String> {
+    let mut ids = Vec::new();
+    let Ok(rd) = std::fs::read_dir("/sys/bus/w1/devices") else {
+        return ids;
+    };
+    for e in rd.flatten() {
+        let n = e.file_name().to_string_lossy().into_owned();
+        if n.starts_with("w1_bus_master") {
+            continue;
+        }
+        ids.push(n);
+    }
+    ids.sort();
+    ids
+}
+
+fn iio_devices() -> Vec<Value> {
+    let mut out = Vec::new();
+    let Ok(rd) = std::fs::read_dir("/sys/bus/iio/devices") else {
+        return out;
+    };
+    let mut entries: Vec<_> = rd.flatten().collect();
+    entries.sort_by_key(|e| e.file_name());
+    for e in entries {
+        let path = e.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let name = std::fs::read_to_string(path.join("name"))
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|_| e.file_name().to_string_lossy().into_owned());
+        let raw = std::fs::read_to_string(path.join("in_voltage0_raw"))
+            .ok()
+            .and_then(|s| s.trim().parse::<i64>().ok())
+            .unwrap_or(0);
+        let scale = std::fs::read_to_string(path.join("in_voltage_scale"))
+            .ok()
+            .and_then(|s| s.trim().parse::<f64>().ok())
+            .unwrap_or(0.0);
+        out.push(json!({"name": name, "raw": raw, "scale": scale}));
+    }
+    out
 }
 
 #[async_trait]
@@ -816,46 +1046,45 @@ impl Tool for InventoryTool {
         json!({"type":"object","properties":{}})
     }
     async fn execute(&self, _args: &Value) -> ToolResult {
-        let mut inv = json!({});
-        if let Ok(model) = std::fs::read_to_string("/proc/device-tree/model") {
-            inv["board"] = json!(model.trim_end_matches('\0'));
-        }
-        if let Ok(o) = std::process::Command::new("sh")
-            .arg("-c")
-            .arg("ls /dev/gpiochip* 2>/dev/null")
-            .output()
-        {
-            inv["gpiochips"] = json!(String::from_utf8_lossy(&o.stdout).trim());
-        }
-        if let Ok(o) = std::process::Command::new("i2cdetect")
-            .args(["-y", self.bus_num.as_str()])
-            .output()
-        {
-            if o.status.success() {
-                let found = parse_i2cdetect(&String::from_utf8_lossy(&o.stdout));
+        let board = std::fs::read_to_string("/proc/device-tree/model")
+            .map(|s| s.trim_end_matches('\0').to_string())
+            .unwrap_or_default();
+        let (i2c_devices, notice) = match self.bus.scan().await {
+            Ok((found, notice)) => {
                 let hex: Vec<String> = found.iter().map(|a| format!("0x{a:02x}")).collect();
-                inv["i2c_devices"] = json!(hex);
+                (hex, notice)
             }
-        }
-        ToolResult::ok("hardware_inventory", inv)
+            Err(e) => return ToolResult::err("hardware_inventory", format!("i2c scan: {e}")),
+        };
+        let inv = json!({
+            "board": board,
+            "gpiochips": gpiochip_names(),
+            "i2c_devices": i2c_devices,
+            "i2c_bus": self.bus.path().display().to_string(),
+            "one_wire": one_wire_ids(),
+            "iio": iio_devices(),
+        });
+        let mut out = ToolResult::ok("hardware_inventory", inv);
+        out.notice = notice;
+        out
     }
 }
 
 /// Build the full real-hardware tool-box for the interactive agent. The shared
 /// `telemetry` instance is pushed directly instead of constructing a second one,
 /// so the Broker's under-voltage STOP and the agent-facing tool read the same
-/// vcgencmd state. `i2c_bus` is threaded into I2cTool + InventoryTool — the
-/// config knob is honored end-to-end, not hardcoded.
+/// vcgencmd state. I2cTool + InventoryTool share one `I2cAdapter` Mutex.
 pub fn build_tools(
     chip: &str,
     i2c_bus: &str,
-    gate: std::sync::Arc<dyn Gate>,
-    telemetry: std::sync::Arc<TelemetryTool>,
+    gate: Arc<dyn Gate>,
+    telemetry: Arc<TelemetryTool>,
 ) -> crate::hil::ToolVec {
+    let bus = I2cAdapter::new(i2c_bus);
     vec![
-        InventoryTool::new(bus_num_from_path(i2c_bus)),
+        InventoryTool::new(bus.clone()),
         telemetry,
-        I2cTool::new(i2c_bus, Some(gate.clone())),
+        I2cTool::new(bus),
         GpioTool::new(chip, Some(gate.clone())),
         ScopeTool::new(chip),
         crate::sim::CodeEditTool::new("."),

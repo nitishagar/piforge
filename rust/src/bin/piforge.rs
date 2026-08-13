@@ -37,15 +37,14 @@ async fn main() -> Result<()> {
         )
     })?;
 
-    // cfg-selected tool construction — two builds, one thin binary. The `hw`
-    // build (Linux, `--features hw`) reads live GPIO/I2C/telemetry through the
-    // agent loop; the default (sim) build stands in for the macOS dev/eval loop.
-    // `confirm` gates Class I (physical) ops — always_deny today, so the agent
-    // can read + scope but not drive pins; real interactive confirm is a future
-    // plan's scope. See build_tools() below.
-    let tools: ToolVec = build_tools(&cfg, Broker::always_deny())?;
+    let tools: ToolVec = build_tools(&cfg, Broker::stdin_confirmer())?;
 
-    let agent = Agent::new(client, tools, cfg.agent.max_turns);
+    let agent = Agent::new(
+        client,
+        tools,
+        cfg.agent.max_turns,
+        cfg.agent.telemetry_preload,
+    );
     let task = match args.task {
         Some(t) => t,
         None => anyhow::bail!("no --task given; interactive mode not yet implemented"),
@@ -74,6 +73,8 @@ fn build_tools(
     // the hw path); exit cleanly, do not fall back to sim silently.
     let chip = hil_hw::resolve_chip(&cfg.hardware.gpiochip)
         .map_err(|e| anyhow::anyhow!("no gpiochip found: {e}; set hardware.gpiochip"))?;
+    let i2c_bus =
+        hil_hw::resolve_i2c_bus(&cfg.hardware.i2c_bus).map_err(|e| anyhow::anyhow!("{e}"))?;
     // Single shared TelemetryTool: one instance backs both the Broker's
     // under-voltage STOP check and the agent-facing `telemetry` tool, so the STOP
     // reflects the same real vcgencmd read the agent sees.
@@ -85,7 +86,7 @@ fn build_tools(
     ));
     Ok(hil_hw::build_tools(
         &chip,
-        &cfg.hardware.i2c_bus,
+        i2c_bus.to_string_lossy().as_ref(),
         gate,
         telemetry,
     ))
@@ -94,16 +95,12 @@ fn build_tools(
 #[cfg(not(feature = "hw"))]
 fn build_tools(
     cfg: &config::Config,
-    _confirm: Arc<dyn Fn(&str) -> bool + Send + Sync>,
+    confirm: Arc<dyn Fn(&str) -> bool + Send + Sync>,
 ) -> Result<ToolVec> {
     // Sim-backed stubs (macOS dev/eval loop). The 6-tool set + order mirrors the
     // hw build exactly — verified by tests/tool_parity.rs.
     let st = sim::State::from_setup(sim::Setup::default());
-    let gate = Arc::new(Broker::new(
-        cfg.safety.clone(),
-        Some(st.clone()),
-        Broker::always_deny(),
-    ));
+    let gate = Arc::new(Broker::new(cfg.safety.clone(), Some(st.clone()), confirm));
     Ok(vec![
         sim::InventoryTool::new(st.clone()),
         sim::TelemetryTool::new(st.clone()),

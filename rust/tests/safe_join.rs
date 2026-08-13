@@ -14,6 +14,7 @@ async fn rejects_traversal_and_absolute() {
         "../../escape.txt",
         "sub/../../../escape.txt",
         "/etc/passwd",
+        "/boot/firmware/config.txt",
     ] {
         let r = tool.execute(&json!({"path":bad,"content":"x"})).await;
         assert!(!r.ok, "should reject {bad}");

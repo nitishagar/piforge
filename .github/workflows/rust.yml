@@ -20,8 +20,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: rust
-      - name: Install Linux hw deps (i2c-tools)
-        run: sudo apt-get update && sudo apt-get install -y i2c-tools
       - name: Format check
         run: cargo fmt --all -- --check
       - name: Clippy
@@ -39,8 +37,9 @@ jobs:
         run: cargo build --release --bin piforge-eval
       - name: Mock eval parity check
         run: |
-          ./target/release/piforge-eval --mock --config Cargo.toml --cases ../eval/cases | tee /tmp/out.txt
-          grep -q "DECISION: PIVOT_TO_CLOUD" /tmp/out.txt
+          ./target/release/piforge-eval --mock --config ../piforge.toml.example --cases ../eval/cases | tee /tmp/out.txt
+          grep -q "DECISION: BUILD_LOCAL" /tmp/out.txt
+          grep -q "passed=13" /tmp/out.txt
 
   # Cross-compile the real hw binary to the Pi 5 target.
   cross-compile-arm64:

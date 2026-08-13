@@ -1,5 +1,6 @@
 //! Configuration: TOML file + env overrides + defaults + validation.
-//! Direct port of the Go config so the same piforge.toml works for both.
+//! Existence of `hardware.i2c_bus` is checked at hw resolve, not here (macOS
+//! has no `/dev/i2c-N`).
 use std::env;
 use std::path::Path;
 
@@ -343,7 +344,7 @@ fn apply_provider(cfg: &mut Config) -> Result<()> {
     Ok(())
 }
 
-/// Validate checks for obvious errors. Mirrors the Go Validate().
+/// Validate checks for obvious errors.
 impl Config {
     pub fn validate(&self) -> Result<()> {
         if self.server.base_url.is_empty() {
@@ -370,6 +371,26 @@ impl Config {
             return Err(anyhow!(
                 "safety.arm_mode=auto requires PIFORGE_ALLOW_AUTO_ARM=1 (DANGEROUS)"
             ));
+        }
+        // Trailing decimal index only. Existence is hw-resolve, not validate (macOS).
+        if !self.hardware.i2c_bus.is_empty() {
+            let digits: String = self
+                .hardware
+                .i2c_bus
+                .chars()
+                .rev()
+                .take_while(|c| c.is_ascii_digit())
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
+            if digits.is_empty() {
+                return Err(anyhow!(
+                    "hardware.i2c_bus {:?} must contain a trailing decimal bus index \
+                     (existence is checked at hw resolve, not here — macOS has no /dev/i2c-N)",
+                    self.hardware.i2c_bus
+                ));
+            }
         }
         Ok(())
     }

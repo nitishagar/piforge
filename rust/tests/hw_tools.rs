@@ -43,12 +43,12 @@ fn since_us_offsets_from_first_event() {
 
 #[test]
 fn bus_num_from_path_extracts_index() {
-    assert_eq!(hil_hw::bus_num_from_path("/dev/i2c-1"), "1");
-    assert_eq!(hil_hw::bus_num_from_path("/dev/i2c-10"), "10");
-    assert_eq!(hil_hw::bus_num_from_path("1"), "1");
-    // No trailing digits => fall back to the Pi default ("1"), not panic.
-    assert_eq!(hil_hw::bus_num_from_path("/dev/i2c-"), "1");
-    assert_eq!(hil_hw::bus_num_from_path(""), "1");
+    assert_eq!(hil_hw::bus_num_from_path("/dev/i2c-1").unwrap(), "1");
+    assert_eq!(hil_hw::bus_num_from_path("/dev/i2c-10").unwrap(), "10");
+    assert_eq!(hil_hw::bus_num_from_path("1").unwrap(), "1");
+    // No trailing digits => Err, not a silent fallback to "1".
+    assert!(hil_hw::bus_num_from_path("/dev/i2c-").is_err());
+    assert!(hil_hw::bus_num_from_path("").is_err());
 }
 
 #[test]

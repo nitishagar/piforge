@@ -18,15 +18,11 @@
 //!   `tests/snapshots/sim_result_keys.json`. Catches sim-side result-field drift
 //!   (e.g. dropping `duration_ms` from the scope result).
 //!
-//! What this file does NOT do (and cannot, off-hardware): diff the hw build's
-//! tools against these snapshots. The hw tools' `execute()` needs real
-//! `/dev/gpiochipN`/`i2cdetect`/`vcgencmd`, absent on CI. That sim↔hw diff is a
-//! manual Pi/Linux step: build `--features hw`, serialize the hw tool-box the
-//! same way, and diff. Note: there are known pre-existing sim↔hw divergences
-//! (tool `description()` strings; the scope `parameters().duration` description;
-//! `telemetry`/`gpio`/`hardware_inventory` result field names) beyond the
-//! `duration_ms` fix this change ships — resolving them is eval-coupled and left
-//! to a separate change.
+//! What this file does NOT do (and cannot, off-hardware): execute hw tools.
+//! Hw `schema()` + `SYSTEM_PROMPT` are pinned separately by `tests/hw_prefix.rs`
+//! (`cfg(feature="hw")`). Result key-sets were unified this change (inventory,
+//! telemetry, gpio); remaining sim↔hw execute differences (live `/dev` vs sim
+//! state) are not in `schema()`.
 //!
 //! The snapshots are self-bootstrapping: the first run creates them and fails
 //! ("re-run to verify"); subsequent runs assert stability. To re-pin after an
@@ -136,7 +132,6 @@ fn key_set(v: &Value) -> String {
 }
 
 #[tokio::test]
-#[ignore = "Phase 2 unified result keys; re-pin in Phase 3. Do not update sim_result_keys.json here."]
 async fn sim_result_keys_stable() {
     let tools = sim_tools();
     // The 5 hardware-variant tools (sim vs hw can diverge). `edit_file` is shared

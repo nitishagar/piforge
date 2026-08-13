@@ -6,7 +6,7 @@
     <title>PiForge — the agent that understands live hardware state</title>
     <meta
       name="description"
-      content="A coding harness for Raspberry Pi 5 that closes the loop between your code and the live sensor / GPIO / I2C state. Fixes the bugs that look like broken hardware but are really numbering, address, library, or config issues."
+      content="A hardware-fault-clearance harness for Raspberry Pi 5. Distinguishes faults that look like broken hardware (numbering, address, library, config) from STOP hardware faults (shorted I2C, undervoltage)."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -55,11 +55,11 @@
           <span class="grad">live hardware state</span>
         </h1>
         <p>
-          A coding harness for Raspberry Pi 5 that closes the loop between your
-          code and the live sensor / GPIO / I2C state. It diagnoses and fixes
-          the bugs that <em>look</em> like broken hardware but are really
-          numbering, address, library, or config issues — and correctly triages
-          the rest as hardware faults.
+          A hardware-fault-clearance harness for Raspberry Pi 5. It distinguishes
+          faults that <em>look</em> like broken hardware (wrong pin numbering,
+          address, library, or config) from <strong>STOP</strong> hardware
+          faults (shorted I2C, undervoltage), and may edit workspace-relative
+          driver files when the gold fix is software.
         </p>
 
         <div class="install">

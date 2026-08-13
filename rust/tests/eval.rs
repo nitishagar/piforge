@@ -1,4 +1,4 @@
-//! Eval scorer + decision-rule tests. Ports of the Go eval_test.go.
+//! Eval scorer + decision-rule tests.
 //! The key regression: word-boundary diagnosis matching must not overmatch
 //! ("default" must NOT trip "fault", "powered" must NOT trip "power").
 use piforge::eval::{decide, summarize, Verdict};
@@ -35,9 +35,7 @@ fn decide_gate_thresholds() {
 }
 
 // The word-boundary matching lives as a private fn in eval.rs; we exercise it
-// indirectly via the public summarize/decide surface and a direct check that
-// the module compiles + the threshold logic holds. (The Go test calls a
-// package-private helper; here we assert the observable decision boundary.)
+// indirectly via the public summarize/decide surface.
 
 #[test]
 fn summarize_aggregates() {

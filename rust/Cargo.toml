@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.75"
 license = "Apache-2.0"
-description = "The agent that understands live hardware state — a coding harness for Raspberry Pi 5"
+description = "Raspberry Pi 5 hardware-fault-clearance harness"
 publish = false
 
 [lib]
@@ -47,7 +47,7 @@ linux-embedded-hal = { version = "0.4", optional = true }
 nix = { version = "0.27", default-features = false, features = ["fs", "poll", "signal", "ioctl"], optional = true }
 
 [features]
-# Hardware access compiles only on Linux (mirrors the Go build-tag split).
+# Hardware access compiles only on Linux.
 # Default on linux; off elsewhere (dev/test on macOS).
 default = []
 hw = ["dep:gpiod", "dep:linux-embedded-hal", "dep:nix"]

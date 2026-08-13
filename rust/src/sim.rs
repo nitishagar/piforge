@@ -449,8 +449,7 @@ impl Tool for CodeEditTool {
 }
 
 /// Resolve a relative path under root, rejecting traversal + symlink escapes.
-/// Mirrors the (fixed) Go safe() helper: evaluates symlinks, uses a
-/// path-separator boundary for the ".." check.
+/// Evaluates symlinks; uses a path-separator boundary for the ".." check.
 fn safe_join(root: &str, rel: &str) -> Result<std::path::PathBuf, String> {
     use std::path::{Component, PathBuf};
     if std::path::Path::new(rel).is_absolute() {

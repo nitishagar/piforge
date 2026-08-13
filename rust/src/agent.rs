@@ -188,7 +188,7 @@ impl Agent {
     }
 }
 
-/// A mutex-guarded mock LLM client for the eval harness (parallel to Go).
+/// A mutex-guarded mock LLM client for the eval harness.
 pub struct MockProvider {
     inner: Mutex<MockInner>,
 }

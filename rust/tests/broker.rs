@@ -1,4 +1,4 @@
-//! Broker safety-gate regression tests. Ports of the Go broker_test.go.
+//! Broker safety-gate regression tests.
 //! The key regression: under-voltage STOP must fire even in auto-arm mode.
 use piforge::broker::{Broker, ThrottledReader};
 use piforge::config::SafetyConfig;

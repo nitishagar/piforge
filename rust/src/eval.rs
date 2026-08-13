@@ -302,7 +302,7 @@ fn truncate(s: &str, n: usize) -> String {
     }
 }
 
-/// Scripted mock turns for the seed cases (matches the Go eval). Returns an
+/// Scripted mock turns for the seed cases. Returns an
 /// empty terminal turn for any case without a script.
 fn script(case_id: &str) -> Vec<MockTurn> {
     match case_id {

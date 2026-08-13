@@ -1,7 +1,7 @@
 //! The safety gate between the agent and physical hardware. Implements the
 //! operation classification (R/B/I) and the under-voltage STOP signal.
 //!
-//! Red-team fixes baked in (vs the original Go draft):
+//! Red-team fixes baked in:
 //!   - The under-voltage check runs FIRST, even in auto-arm mode (it must not
 //!     be bypassed).
 //!   - Arming is scoped + time-limited (30s window per op+pin); never a global

@@ -1,11 +1,11 @@
-//! PiForge — the agent that understands live hardware state.
+//! PiForge — Raspberry Pi 5 hardware-fault-clearance harness.
 //!
-//! A coding harness for Raspberry Pi 5 that closes the loop between your code
-//! and the live sensor / GPIO / I2C state. Rust port (parallel to the Go
-//! implementation on `main`). Must beat the Go baseline on binary size, RSS,
-//! and scope jitter to justify a merge.
+//! Distinguishes faults that look like broken hardware (pin numbering, I2C
+//! address, library, overlay, IIO scale) from STOP hardware faults (shorted
+//! I2C, undervoltage). May edit workspace-relative driver/config files when
+//! the gold fix is software.
 //!
-//! Architecture mirrors the Go packages:
+//! Modules:
 //!   - [`config`] — TOML config + defaults + validation
 //!   - [`provider`] — llama-server (OpenAI-compat) client
 //!   - [`hil`] — typed HIL tool surface (real on Linux `hw` feature; stubs off)

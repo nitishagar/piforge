@@ -649,7 +649,7 @@ impl Tool for I2cTool {
                     "raw_hex":raw_hex,
                     "raw_dec":bytes,
                 });
-                // 2-byte reads: surface both endian interpretations (parity with Go).
+                // 2-byte reads: surface both endian interpretations.
                 if bytes.len() == 2 {
                     let be = u16::from_be_bytes([bytes[0], bytes[1]]);
                     let le = u16::from_le_bytes([bytes[0], bytes[1]]);

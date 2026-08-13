@@ -1,5 +1,4 @@
 //! Configuration: TOML file + env overrides + defaults + validation.
-//! Direct port of the Go config so the same piforge.toml works for both.
 use std::env;
 use std::path::Path;
 
@@ -343,7 +342,7 @@ fn apply_provider(cfg: &mut Config) -> Result<()> {
     Ok(())
 }
 
-/// Validate checks for obvious errors. Mirrors the Go Validate().
+/// Validate checks for obvious errors.
 impl Config {
     pub fn validate(&self) -> Result<()> {
         if self.server.base_url.is_empty() {

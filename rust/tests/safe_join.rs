@@ -1,5 +1,5 @@
 //! Path-traversal + symlink-escape regression tests for the code-edit tool.
-//! Ports of the Go codeedit_test.go. The key regression: a symlink under the
+//! The key regression: a symlink under the
 //! workspace that points outside must NOT let edits escape.
 use piforge::hil::Tool; // bring execute() into scope
 use piforge::sim::{CodeEditTool, Setup};

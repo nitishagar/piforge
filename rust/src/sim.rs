@@ -18,11 +18,14 @@ pub struct State {
 
 struct StateInner {
     board: String,
+    i2c_bus_present: bool,
     i2c: Option<I2CBus>,
     gpio: HashMap<i32, Pin>,
     dmesg_tail: Vec<String>,
     throttled: u64,
     files: HashMap<String, String>,
+    one_wire: Vec<String>,
+    iio: Vec<IioDevice>,
 }
 
 #[derive(Default)]
@@ -34,6 +37,7 @@ struct I2CBus {
 
 struct I2CDevice {
     chip: String,
+    registers: HashMap<i32, Vec<u8>>,
 }
 
 struct Pin {
@@ -41,12 +45,16 @@ struct Pin {
 }
 
 /// A sim fixture (mirrors eval::Case::Setup).
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Setup {
     #[serde(default)]
     pub board: String,
     #[serde(default)]
     pub i2c_devices: HashMap<i32, String>,
+    /// Per-address register map: addr → (register → bytes). Fixture-driven chip-id.
+    #[serde(default)]
+    pub i2c_registers: HashMap<i32, HashMap<i32, Vec<u8>>>,
     #[serde(default)]
     pub scan_pattern: String,
     #[serde(default)]
@@ -57,25 +65,82 @@ pub struct Setup {
     pub dmesg_tail: Vec<String>,
     #[serde(default)]
     pub throttled: String,
+    #[serde(default)]
+    pub one_wire: Vec<String>,
+    #[serde(default)]
+    pub iio: Vec<IioDevice>,
+    /// Distinct from an enabled empty bus. False for `i2c-not-enabled`.
+    #[serde(default = "default_true")]
+    pub i2c_bus_present: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for Setup {
+    fn default() -> Self {
+        Self {
+            board: String::new(),
+            i2c_devices: HashMap::new(),
+            i2c_registers: HashMap::new(),
+            scan_pattern: String::new(),
+            gpio_pins: HashMap::new(),
+            files: HashMap::new(),
+            dmesg_tail: Vec::new(),
+            throttled: String::new(),
+            one_wire: Vec::new(),
+            iio: Vec::new(),
+            i2c_bus_present: true,
+        }
+    }
+}
+
+/// One IIO node exposed on inventory (`raw` + `scale`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct IioDevice {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub raw: i64,
+    #[serde(default)]
+    pub scale: f64,
 }
 
 impl State {
     pub fn from_setup(s: Setup) -> Arc<Self> {
-        // SAFETY note: Arc not used here but kept consistent with shared usage.
         let mut i2c_devices = HashMap::new();
         for (addr, chip) in &s.i2c_devices {
             if *addr == 0 {
                 continue;
             }
-            i2c_devices.insert(*addr, I2CDevice { chip: chip.clone() });
+            i2c_devices.insert(
+                *addr,
+                I2CDevice {
+                    chip: chip.clone(),
+                    registers: HashMap::new(),
+                },
+            );
         }
-        let i2c = if s.i2c_devices.is_empty() && s.scan_pattern.is_empty() {
-            None
-        } else {
+        for (addr, regs) in &s.i2c_registers {
+            if *addr == 0 {
+                continue;
+            }
+            i2c_devices
+                .entry(*addr)
+                .or_insert_with(|| I2CDevice {
+                    chip: String::new(),
+                    registers: HashMap::new(),
+                })
+                .registers = regs.clone();
+        }
+        let i2c = if s.i2c_bus_present {
             Some(I2CBus {
                 devices: i2c_devices,
                 scan_pattern: s.scan_pattern.clone(),
             })
+        } else {
+            None
         };
         let mut gpio = HashMap::new();
         for (pin, _mode) in s.gpio_pins {
@@ -84,11 +149,14 @@ impl State {
         Arc::new(Self {
             inner: Mutex::new(StateInner {
                 board: s.board,
+                i2c_bus_present: s.i2c_bus_present,
                 i2c,
                 gpio,
                 dmesg_tail: s.dmesg_tail,
                 throttled: parse_hex(&s.throttled),
                 files: s.files,
+                one_wire: s.one_wire,
+                iio: s.iio,
             }),
         })
     }
@@ -128,15 +196,29 @@ impl Tool for InventoryTool {
     }
     async fn execute(&self, _args: &Value) -> ToolResult {
         let s = self.st.inner.lock();
-        let mut inv = json!({"board": s.board});
-        if let Some(bus) = &s.i2c {
-            let addrs: Vec<String> = bus.devices.keys().map(|a| format!("0x{a:02x}")).collect();
-            inv["i2c_devices"] = json!(addrs);
-        }
-        if !s.gpio.is_empty() {
-            let pins: Vec<i32> = s.gpio.keys().copied().collect();
-            inv["gpio_pins"] = json!(pins);
-        }
+        let i2c_devices: Vec<String> = s
+            .i2c
+            .as_ref()
+            .map(|bus| bus.devices.keys().map(|a| format!("0x{a:02x}")).collect())
+            .unwrap_or_default();
+        let gpiochips: Vec<&str> = if s.gpio.is_empty() {
+            vec![]
+        } else {
+            vec!["sim"]
+        };
+        let i2c_bus = if s.i2c_bus_present {
+            json!("/dev/i2c-1")
+        } else {
+            json!("absent")
+        };
+        let inv = json!({
+            "board": s.board,
+            "gpiochips": gpiochips,
+            "i2c_devices": i2c_devices,
+            "i2c_bus": i2c_bus,
+            "one_wire": s.one_wire,
+            "iio": s.iio,
+        });
         ToolResult::ok("hardware_inventory", inv)
     }
 }
@@ -193,16 +275,29 @@ impl Tool for TelemetryTool {
                 }
             }
             _ => {
-                let mut out =
-                    json!({"cpu_temp":"temp=48.5'C","core_volts":"volt=1.0V","board":s.board});
                 let uv = s.throttled & (1 << 0) != 0 || s.throttled & (1 << 16) != 0;
-                if uv {
-                    out["notice"] = json!("UNDERVOLTAGE detected — STOP before adding load.");
-                }
+                let mut out = json!({
+                    "throttled_raw": format!("0x{:x}", s.throttled),
+                    "under_voltage": uv,
+                    "cpu_temp": "temp=48.5'C",
+                    "telemetry_known": true,
+                });
                 if !s.dmesg_tail.is_empty() {
                     out["dmesg_tail"] = json!(s.dmesg_tail.join("\n"));
                 }
-                ToolResult::ok("telemetry", out)
+                let notice = if uv {
+                    Some("UNDERVOLTAGE detected — STOP before adding load.".into())
+                } else {
+                    None
+                };
+                ToolResult {
+                    tool: "telemetry".into(),
+                    ok: true,
+                    value: Some(out),
+                    unit: None,
+                    error: None,
+                    notice,
+                }
             }
         }
     }
@@ -236,9 +331,12 @@ impl Tool for I2CTool {
             .unwrap_or("scan");
         let addr = args.get("address").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
         let s = self.st.inner.lock();
+        if !s.i2c_bus_present {
+            return i2c_not_enabled();
+        }
         match action {
             "scan" => match &s.i2c {
-                None => ToolResult::ok("i2c", json!({"devices":[],"count":0})),
+                None => i2c_not_enabled(),
                 Some(bus) if bus.scan_pattern == "all" => {
                     let hex: Vec<String> = (0x08..=0x77).map(|a| format!("0x{a:02x}")).collect();
                     ToolResult { tool:"i2c".into(), ok:true, value:Some(json!({"devices":hex,"count":hex.len()})), unit:Some("7-bit addr".into()), error:None, notice:Some("many addresses responded — likely SDA/SCL shorted to power; STOP and check wiring".into()) }
@@ -276,10 +374,26 @@ impl Tool for I2CTool {
                 if let Some(bus) = &s.i2c {
                     if let Some(dev) = bus.devices.get(&addr) {
                         let reg = args.get("register").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-                        let n = args.get("length").and_then(|v| v.as_i64()).unwrap_or(1) as usize;
-                        let zeros: Vec<u8> = vec![0; n];
-                        let raw_hex: String = zeros.iter().map(|b| format!("{b:02x}")).collect();
-                        let mut out = json!({"address":format!("0x{addr:02x}"),"register":format!("0x{reg:02x}"),"raw_hex":raw_hex,"raw_dec":zeros});
+                        let n = args
+                            .get("length")
+                            .and_then(|v| v.as_i64())
+                            .unwrap_or(1)
+                            .clamp(1, 32) as usize;
+                        let Some(bytes) = dev.registers.get(&reg) else {
+                            return ToolResult::err(
+                                "i2c",
+                                format!("no register 0x{reg:02x} at 0x{addr:02x}"),
+                            );
+                        };
+                        if bytes.len() < n {
+                            return ToolResult::err(
+                                "i2c",
+                                format!("register 0x{reg:02x} shorter than length {n}"),
+                            );
+                        }
+                        let slice = &bytes[..n];
+                        let raw_hex: String = slice.iter().map(|b| format!("{b:02x}")).collect();
+                        let mut out = json!({"address":format!("0x{addr:02x}"),"register":format!("0x{reg:02x}"),"raw_hex":raw_hex,"raw_dec":slice});
                         if !dev.chip.is_empty() {
                             out["chip"] = json!(dev.chip);
                         }
@@ -325,9 +439,11 @@ impl Tool for GPIOTool {
         let mut s = self.st.inner.lock();
         match action {
             "get" => match s.gpio.get(&pin) {
-                Some(p) => {
-                    ToolResult::ok_unit("gpio", json!({"pin":pin,"value":p.value}), "level(0|1)")
-                }
+                Some(p) => ToolResult::ok_unit(
+                    "gpio",
+                    json!({"pin":pin,"value":p.value,"chip":"sim"}),
+                    "level(0|1)",
+                ),
                 None => ToolResult::err("gpio", format!("pin {pin} not in profile")),
             },
             "set" => {
@@ -346,7 +462,7 @@ impl Tool for GPIOTool {
                 s.gpio.get_mut(&pin).unwrap().value = value;
                 ToolResult::ok_unit(
                     "gpio",
-                    json!({"pin":pin,"value":value,"driven":true}),
+                    json!({"pin":pin,"value":value,"chip":"sim","driven":true}),
                     "level(0|1)",
                 )
             }
@@ -478,6 +594,17 @@ fn safe_join(root: &str, rel: &str) -> Result<std::path::PathBuf, String> {
     }
 }
 
+fn i2c_not_enabled() -> ToolResult {
+    ToolResult {
+        tool: "i2c".into(),
+        ok: false,
+        value: None,
+        unit: None,
+        error: Some("i2c not enabled".into()),
+        notice: Some("i2c not enabled — add dtparam=i2c_arm=on".into()),
+    }
+}
+
 /// Parse a throttled hex string (handles "0x10000", "throttled=0x10000", "").
 fn parse_hex(s: &str) -> u64 {
     let s = s.trim();
@@ -500,5 +627,118 @@ mod tests {
         assert_eq!(parse_hex("0x10000"), 0x10000);
         assert_eq!(parse_hex("throttled=0x1"), 1);
         assert_eq!(parse_hex(""), 0);
+    }
+
+    #[tokio::test]
+    async fn bmp280_chip_id_register_d0_is_0x58() {
+        let mut i2c_devices = HashMap::new();
+        i2c_devices.insert(0x76, "BMP280".into());
+        let mut chip_regs = HashMap::new();
+        chip_regs.insert(0xD0, vec![0x58]);
+        let mut i2c_registers = HashMap::new();
+        i2c_registers.insert(0x76, chip_regs);
+        let st = State::from_setup(Setup {
+            i2c_devices,
+            i2c_registers,
+            ..Setup::default()
+        });
+        let tool = I2CTool::new(st);
+        let res = tool
+            .execute(&json!({"action":"read","address":0x76,"register":0xD0,"length":1}))
+            .await;
+        assert!(res.ok, "read should succeed: {:?}", res.error);
+        let value = res.value.expect("value");
+        assert_eq!(value["raw_dec"], json!([0x58]));
+    }
+
+    #[tokio::test]
+    async fn bus_absent_scan_is_not_count_zero() {
+        let st = State::from_setup(Setup {
+            i2c_bus_present: false,
+            ..Setup::default()
+        });
+        let tool = I2CTool::new(st);
+        let res = tool.execute(&json!({"action":"scan"})).await;
+        assert!(!res.ok, "absent bus must fail, not look like an empty scan");
+        assert_ne!(res.value, Some(json!({"devices":[],"count":0})));
+        let notice = res.notice.unwrap_or_default().to_lowercase();
+        let error = res.error.unwrap_or_default().to_lowercase();
+        assert!(
+            notice.contains("i2c not enabled") || error.contains("i2c not enabled"),
+            "notice={notice:?} error={error:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_register_is_error_not_zeros() {
+        let mut i2c_devices = HashMap::new();
+        i2c_devices.insert(0x76, "BMP280".into());
+        let st = State::from_setup(Setup {
+            i2c_devices,
+            ..Setup::default()
+        });
+        let tool = I2CTool::new(st);
+        let res = tool
+            .execute(&json!({"action":"read","address":0x76,"register":0xD0,"length":1}))
+            .await;
+        assert!(!res.ok, "missing register must error, got {:?}", res.value);
+        assert_ne!(res.value, Some(json!({"raw_dec":[0]})));
+        let err = res.error.unwrap_or_default();
+        assert!(
+            err.contains("no register"),
+            "expected missing-register error, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn i2c_read_length_clips_to_1_through_32() {
+        let mut i2c_devices = HashMap::new();
+        i2c_devices.insert(0x76, "BMP280".into());
+        let mut chip_regs = HashMap::new();
+        chip_regs.insert(0xD0, vec![0xAA; 32]);
+        let mut i2c_registers = HashMap::new();
+        i2c_registers.insert(0x76, chip_regs);
+        let st = State::from_setup(Setup {
+            i2c_devices,
+            i2c_registers,
+            ..Setup::default()
+        });
+        let tool = I2CTool::new(st.clone());
+        let too_small = tool
+            .execute(&json!({"action":"read","address":0x76,"register":0xD0,"length":0}))
+            .await;
+        assert!(too_small.ok, "{:?}", too_small.error);
+        assert_eq!(too_small.value.unwrap()["raw_dec"], json!([0xAA]));
+
+        let tool = I2CTool::new(st);
+        let too_big = tool
+            .execute(&json!({"action":"read","address":0x76,"register":0xD0,"length":100}))
+            .await;
+        assert!(too_big.ok, "{:?}", too_big.error);
+        let dec = too_big.value.unwrap()["raw_dec"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert_eq!(dec.len(), 32);
+    }
+
+    #[tokio::test]
+    async fn gpio_set_includes_chip_sim() {
+        let mut pins = HashMap::new();
+        pins.insert(4, "out".into());
+        let st = State::from_setup(Setup {
+            gpio_pins: pins,
+            ..Setup::default()
+        });
+        let tool = GPIOTool::new(st, None);
+        let res = tool
+            .execute(&json!({"action":"set","pin":4,"value":1}))
+            .await;
+        assert!(res.ok, "{:?}", res.error);
+        let v = res.value.expect("value");
+        assert_eq!(v["pin"], json!(4));
+        assert_eq!(v["value"], json!(1));
+        assert_eq!(v["chip"], json!("sim"));
+        assert_eq!(v["driven"], json!(true));
     }
 }

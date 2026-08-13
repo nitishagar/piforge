@@ -5,6 +5,10 @@
   "setup": {
     "board": "Raspberry Pi 5 Model B Rev 1.0",
     "i2c_devices": {},
+    "one_wire": [],
+    "files": {
+      "config.txt": "# Raspberry Pi boot config (workspace-relative seed)\narm_64bit=1\n"
+    },
     "dmesg_tail": [],
     "throttled": "0x0"
   },

@@ -5,6 +5,11 @@
   "setup": {
     "board": "Raspberry Pi 5 Model B Rev 1.0",
     "i2c_devices": { "118": "BMP280" },
+    "i2c_registers": {
+      "118": {
+        "208": [88]
+      }
+    },
     "files": {
       "bme.py": "from board import *\nfrom adafruit_bme280 import basic as adafruit_bme280\ni2c = I2C(scl, sda)\nbme = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)\nprint(bme.humidity)\n"
     },

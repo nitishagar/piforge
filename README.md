@@ -1,9 +1,11 @@
 # piforge
 
-A coding harness for Raspberry Pi 5 that closes the loop between your code and
-the live sensor / GPIO / I2C state. It diagnoses and fixes the bugs that *look*
-like broken hardware but are really numbering, address, library, or config
-issues — and correctly triages the rest as hardware faults.
+A hardware-fault-clearance harness for Raspberry Pi 5. It distinguishes faults
+that *look* like broken hardware (wrong BCM vs BOARD pin, RPi.GPIO on Pi 5,
+software PWM jitter, wrong I2C address, BMP vs BME variant, missing overlay,
+IIO scale, unit conversion) from **STOP** hardware faults (shorted I2C,
+undervoltage). It may edit workspace-relative driver/config files when the gold
+fix is software.
 
 > The agent that **understands** live hardware state: typed sensor reads with
 > units/ranges and sub-millisecond time-series correlation, instead of parsing
@@ -11,13 +13,13 @@ issues — and correctly triages the rest as hardware faults.
 
 ## Implementation
 
-**Rust** (primary) lives under `rust/`. Pure Rust, no libgpiod C dependency
-(uses the `gpiod` crate, which talks to `/dev/gpiochipN` directly). Cross-
-compiles to a ~2.7 MB static `aarch64` binary you drop on the Pi.
+Rust lives under `rust/`. Pure Rust, no libgpiod C dependency (uses the `gpiod`
+crate, which talks to `/dev/gpiochipN` directly). Cross-compiles to a ~2.7 MB
+`aarch64` binary you drop on the Pi.
 
-A **Go** implementation under `internal/` + `cmd/` is preserved in the repo for
-reference. Both are functional and red-team-tested; Rust is the active path.
-See [`bench/RUST_VS_GO.md`](bench/RUST_VS_GO.md) for the measurement comparison.
+See [`bench/BASELINE.md`](bench/BASELINE.md) and
+[`bench/RUST_VS_GO.md`](bench/RUST_VS_GO.md) for binary size, RSS, and
+scope-jitter measurements.
 
 ## Status
 
@@ -26,7 +28,7 @@ betting on the local-appliance product, run the eval to verify a ~4B model can
 actually diagnose hardware faults from live state (no public benchmark covers
 this).
 
-## Build (Rust, primary)
+## Build
 
 ```
 # native (e.g. on the Pi 5)
@@ -38,8 +40,8 @@ cargo build --release --features hw --target aarch64-unknown-linux-gnu --bin pif
 ```
 
 The `--features hw` flag compiles the real hardware tools (GPIO/I2C/scope/
-telemetry via `gpiod` + `i2c-tools` + `vcgencmd`). Without it, the sim-backed
-tools stand in so the loop runs on any host for dev/eval.
+telemetry via `gpiod` + in-process I2C ioctls + `vcgencmd`). Without it, the
+sim-backed tools stand in so the loop runs on any host for dev/eval.
 
 ## Run
 
@@ -107,17 +109,16 @@ for the full provider list, the retry/auth behavior, and the eval-gate workflow.
 ## Layout
 
 ```
-rust/                        Rust implementation (primary)
+rust/                        implementation
   src/{config,provider,hil,broker,agent,sim,eval}.rs
   src/hil_hw.rs              real HW tools (Linux, behind the `hw` feature)
   src/bin/{piforge,piforge_eval}.rs
   tests/                     red-team regression tests
   benches/jitter.rs          scope-jitter micro-bench (the moat metric)
-internal/ + cmd/             Go implementation (reference, preserved)
 eval/cases/                  case fixtures covering the recurring bug archetypes
-bench/                       baseline + comparison docs
+bench/                       size / RSS / jitter notes
 docs/                        GitHub Pages site
-.github/workflows/           ci.yml (Go) + rust.yml (Rust)
+.github/workflows/           ci.yml (Rust)
 ```
 
 ## Hardware notes

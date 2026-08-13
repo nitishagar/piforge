@@ -48,7 +48,8 @@ max_turns = 12
 telemetry_preload = true
 
 [hardware]
-# Pi 5 40-pin header. Leave empty to auto-discover (resolves to gpiochip4).
+# Pi 5 40-pin header. Leave empty to auto-discover (gpiochip4, following a
+# compat symlink to gpiochip0 on current Pi OS).
 gpiochip = ""
 i2c_bus = "/dev/i2c-1"
 

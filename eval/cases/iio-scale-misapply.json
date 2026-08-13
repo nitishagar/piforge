@@ -5,13 +5,23 @@
   "setup": {
     "board": "Raspberry Pi 5 Model B Rev 1.0",
     "i2c_devices": {},
+    "iio": [
+      {
+        "name": "iio:device0",
+        "raw": 4095,
+        "scale": 0.439453125
+      }
+    ],
+    "files": {
+      "adc_read.py": "raw = int(open(\"/sys/bus/iio/devices/iio:device0/in_voltage0_raw\").read())\nprint(raw)\n"
+    },
     "dmesg_tail": [],
     "throttled": "0x0"
   },
   "gold": {
     "diagnosis": "The raw IIO value must be multiplied by in_voltage_scale to get volts. If scale is 0.439453125 (mV), then 4095 * 0.439453125 / 1000 ≈ 1.8V (saturated). The reading of 4095 means the input exceeds the ADC range. The code likely forgets to apply the scale or uses the wrong reference voltage.",
-    "fix_applies": "",
-    "fix_must_contain": [],
+    "fix_applies": "adc_read.py",
+    "fix_must_contain": ["in_voltage_scale", "raw *"],
     "fix_must_not_have": [],
     "is_hardware_fault": false
   },

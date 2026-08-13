@@ -4,17 +4,15 @@
 //! and a mock provider lets it all run in CI without a llama-server.
 //!
 //! Decision rule: ≥55% fix-rate AND <10% register/pin hallucination → BUILD_LOCAL.
-use std::path::Path;
+use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
-use tokio::sync::Mutex;
 
 use crate::agent::{Agent, LlmClient, MockProvider, MockTurn};
 use crate::broker::{Broker, ThrottledReader};
 use crate::config::{Config, EvalConfig};
-use crate::hil::{Tool, ToolVec};
+use crate::hil::ToolVec;
 use crate::provider::ToolCall;
 use crate::sim::{self, CodeEditTool, Setup, State};
 
@@ -64,23 +62,26 @@ pub struct Runner {
     client: Option<std::sync::Arc<dyn LlmClient>>,
     mock: Option<std::sync::Arc<MockProvider>>,
     max_turns: u32,
+    preload: bool,
 }
 
 impl Runner {
-    pub fn new(client: std::sync::Arc<dyn LlmClient>, max_turns: u32) -> Self {
+    pub fn new(client: std::sync::Arc<dyn LlmClient>, max_turns: u32, preload: bool) -> Self {
         Self {
             client: Some(client),
             mock: None,
             max_turns,
+            preload,
         }
     }
-    pub fn new_mock(max_turns: u32) -> (Self, std::sync::Arc<MockProvider>) {
+    pub fn new_mock(max_turns: u32, preload: bool) -> (Self, std::sync::Arc<MockProvider>) {
         let mock = std::sync::Arc::new(MockProvider::new());
         (
             Self {
                 client: None,
                 mock: Some(mock.clone()),
                 max_turns,
+                preload,
             },
             mock,
         )
@@ -120,7 +121,7 @@ impl Runner {
         };
 
         // Per-case temp workspace seeded with the fixture's files.
-        let workspace = match temp_workspace(&c.setup.files) {
+        let workspace = match temp_workspace(&c.id, &c.setup.files) {
             Ok(w) => w,
             Err(e) => {
                 v.notes = format!("error: {e}");
@@ -141,7 +142,7 @@ impl Runner {
             Some(st_reader),
             Broker::always_deny(),
         ));
-        let edit_tool = CodeEditTool::new(&workspace);
+        let edit_tool = CodeEditTool::new(workspace.path.to_string_lossy().into_owned());
         let tools: ToolVec = vec![
             sim::InventoryTool::new(st.clone()),
             sim::TelemetryTool::new(st.clone()),
@@ -153,14 +154,18 @@ impl Runner {
 
         let res = match &self.client {
             Some(client) => {
-                let agent = Agent::new(client.clone(), tools, self.max_turns);
+                let agent = Agent::new(client.clone(), tools, self.max_turns, self.preload);
                 agent.run(&c.symptom, |_| ()).await
             }
             None => {
                 let mock = self.mock.clone().unwrap();
                 mock.load(script(&c.id)).await;
-                let agent =
-                    Agent::new(mock as std::sync::Arc<dyn LlmClient>, tools, self.max_turns);
+                let agent = Agent::new(
+                    mock as std::sync::Arc<dyn LlmClient>,
+                    tools,
+                    self.max_turns,
+                    self.preload,
+                );
                 agent.run(&c.symptom, |_| ()).await
             }
         };
@@ -189,7 +194,7 @@ impl Runner {
             .any(|h| lower.contains(&h.to_lowercase()));
 
         if !c.gold.fix_applies.is_empty() && !c.gold.fix_must_contain.is_empty() {
-            let path = std::path::Path::new(&workspace).join(&c.gold.fix_applies);
+            let path = workspace.path.join(&c.gold.fix_applies);
             if let Ok(got) = std::fs::read_to_string(&path) {
                 let all_in = c.gold.fix_must_contain.iter().all(|s| got.contains(s));
                 let none_bad = !c.gold.fix_must_not_have.iter().any(|s| got.contains(s));
@@ -200,6 +205,13 @@ impl Runner {
             v.partial = contains_diagnosis(&lower);
             // Pass requires BOTH a correct triage AND no edit_file calls.
             v.pass_ = v.partial && edit_count == 0;
+        }
+        if !c.gold.is_hardware_fault && c.gold.fix_applies.is_empty() {
+            v.pass_ = false;
+            v.notes = format!(
+                "malformed gold: empty fix_applies for non-hardware-fault case {}",
+                c.id
+            );
         }
         v
     }
@@ -278,9 +290,47 @@ fn contains_diagnosis(lower: &str) -> bool {
     PHRASES.iter().any(|p| lower.contains(p))
 }
 
-/// Create a temp dir seeded with `files`; returns its path. Caller cleans up.
-fn temp_workspace(files: &std::collections::HashMap<String, String>) -> Result<String> {
-    let dir = std::env::temp_dir().join(format!("piforge-eval-{}", std::process::id()));
+/// Unique per-case workspace. `remove_dir_all` on Drop after scoring and on
+/// `Err` return. Honest bound: release `panic = "abort"` will not run Drop.
+struct WorkspaceGuard {
+    path: PathBuf,
+}
+
+impl Drop for WorkspaceGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+fn sanitize_case_id(id: &str) -> String {
+    let s: String = id
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if s.is_empty() {
+        "unknown".into()
+    } else {
+        s
+    }
+}
+
+/// Create a unique temp dir seeded with `files`.
+fn temp_workspace(
+    case_id: &str,
+    files: &std::collections::HashMap<String, String>,
+) -> Result<WorkspaceGuard> {
+    let dir = std::env::temp_dir().join(format!(
+        "piforge-eval-{}-{}",
+        std::process::id(),
+        sanitize_case_id(case_id)
+    ));
+    let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir)?;
     for (rel, content) in files {
         let abs = dir.join(rel);
@@ -289,7 +339,7 @@ fn temp_workspace(files: &std::collections::HashMap<String, String>) -> Result<S
         }
         std::fs::write(&abs, content)?;
     }
-    Ok(dir.to_string_lossy().into_owned())
+    Ok(WorkspaceGuard { path: dir })
 }
 
 fn truncate(s: &str, n: usize) -> String {
@@ -302,15 +352,19 @@ fn truncate(s: &str, n: usize) -> String {
     }
 }
 
-/// Scripted mock turns for the seed cases (matches the Go eval). Returns an
-/// empty terminal turn for any case without a script.
+/// Scripted mock turns for all 13 case ids. Unknown ids get an empty terminal turn.
 fn script(case_id: &str) -> Vec<MockTurn> {
     match case_id {
         "wrong-i2c-address-bme280-0x76" => vec![
             mturn_call("i2c", r#"{"action":"scan"}"#, 120, 0),
             mturn_call("i2c", r#"{"action":"detect","address":118}"#, 200, 180),
-            mturn_call("edit_file", &format!(r#"{{"path":"bme_simpletest.py","content":"from board import *\nfrom adafruit_bme280 import basic as adafruit_bme280\ni2c = I2C(scl, sda)\nbme = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)\nprint(bme.humidity)\n"}}"#), 280, 260),
+            mturn_call("edit_file", r#"{"path":"bme_simpletest.py","content":"from board import *\nfrom adafruit_bme280 import basic as adafruit_bme280\ni2c = I2C(scl, sda)\nbme = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)\nprint(bme.humidity)\n"}"#, 280, 260),
             mturn_text("Fixed: BME280 is at 0x76, not the default 0x77. Set address=0x76.", 320, 300),
+        ],
+        "i2c-wrong-address-0x77" => vec![
+            mturn_call("hardware_inventory", r#"{}"#, 110, 0),
+            mturn_call("i2c", r#"{"action":"scan"}"#, 180, 160),
+            mturn_text("i2cdetect is empty even though the header has 3.3 V — SDA/SCL look swapped. This is a wiring fault. STOP coding; rewire the I2C pins.", 240, 220),
         ],
         "i2c-bus-scan-all-addresses" => vec![
             mturn_call("i2c", r#"{"action":"scan"}"#, 120, 100),
@@ -319,6 +373,47 @@ fn script(case_id: &str) -> Vec<MockTurn> {
         "undervoltage-brownout" => vec![
             mturn_call("telemetry", r#"{"action":"snapshot"}"#, 130, 110),
             mturn_text("vcgencmd get_throttled shows undervoltage has occurred (bit 16). This is a power-supply problem, not code — use a 5V/3A+ PSU and don't power servos from the 3.3V rail. STOP coding.", 210, 190),
+        ],
+        "gpio-board-vs-bcm-numbering" => vec![
+            mturn_call("edit_file", r#"{"path":"blink.py","content":"from gpiozero import LED\nfrom time import sleep\nled = LED(17)\nwhile True:\n    led.on()\n    sleep(0.5)\n    led.off()\n    sleep(0.5)\n"}"#, 200, 180),
+            mturn_text("gpiozero uses BCM numbering. Physical pin 11 is BCM 17; use LED(17).", 260, 240),
+        ],
+        "pi5-rpigpio-migration-break" => vec![
+            mturn_call("edit_file", r#"{"path":"app.py","content":"from gpiozero import LED\nled = LED(17)\nled.on()\n"}"#, 200, 180),
+            mturn_text("RPi.GPIO cannot drive Pi 5 GPIO. Rewrote with gpiozero.", 260, 240),
+        ],
+        "servo-jitter-software-pwm" => vec![
+            mturn_call("edit_file", r#"{"path":"servo.py","content":"from gpiozero import Servo\nfrom time import sleep\nservo = Servo(17)\nwhile True:\n    sleep(1)\n"}"#, 200, 180),
+            mturn_text("Software PWM jitters under Linux. Use gpiozero Servo (hardware-timed on Pi 5).", 260, 240),
+        ],
+        "bmp280-vs-bme280-chipid" => vec![
+            mturn_call("i2c", r#"{"action":"read","address":118,"register":208,"length":1}"#, 120, 0),
+            mturn_call("edit_file", r#"{"path":"bme.py","content":"from board import *\nimport adafruit_bmp280\ni2c = I2C(scl, sda)\nbmp = adafruit_bmp280.Adafruit_BMP280_I2C(i2c, address=0x76)\nprint(bmp.pressure)\n"}"#, 200, 180),
+            mturn_text("Chip-id 0x58 at 0xD0 is a BMP280, not a BME280. Switched to the BMP280 driver.", 260, 240),
+        ],
+        "bme280-pressure-unit-conversion" => vec![
+            mturn_call("edit_file", r#"{"path":"bme_read.py","content":"def read_pressure(reg_bytes):\n    raw = int.from_bytes(reg_bytes, 'big')\n    return raw * 100  # hPa to Pa\n"}"#, 200, 180),
+            mturn_text("Pressure was in hPa; multiply by 100 to report Pa.", 260, 240),
+        ],
+        "i2c-not-enabled" => vec![
+            mturn_call("i2c", r#"{"action":"scan"}"#, 120, 0),
+            mturn_call("edit_file", r#"{"path":"config.txt","content":"arm_64bit=1\ndtparam=i2c_arm=on\n"}"#, 200, 180),
+            mturn_text("I2C overlay was off. Added dtparam=i2c_arm=on to workspace config.txt.", 260, 240),
+        ],
+        "ds18b20-1wire-overlay-missing" => vec![
+            mturn_call("hardware_inventory", r#"{}"#, 110, 0),
+            mturn_call("edit_file", r#"{"path":"config.txt","content":"arm_64bit=1\ndtoverlay=w1-gpio\n"}"#, 200, 180),
+            mturn_text("1-wire overlay missing. Added dtoverlay=w1-gpio to workspace config.txt.", 260, 240),
+        ],
+        "iio-scale-misapply" => vec![
+            mturn_call("hardware_inventory", r#"{}"#, 110, 0),
+            mturn_call("edit_file", r#"{"path":"adc_read.py","content":"raw = int(open(\"/sys/bus/iio/devices/iio:device0/in_voltage0_raw\").read())\nscale = float(open(\"/sys/bus/iio/devices/iio:device0/in_voltage_scale\").read())\nprint(raw * scale / 1000)\n"}"#, 200, 180),
+            mturn_text("Raw IIO counts must be multiplied by in_voltage_scale.", 260, 240),
+        ],
+        "i2c-device-not-found-timeout" => vec![
+            mturn_call("i2c", r#"{"action":"scan"}"#, 120, 0),
+            mturn_call("edit_file", r#"{"path":"mpu.py","content":"from mpu6050 import MPU6050\nsensor = MPU6050(address=0x68)\nprint(sensor.get_accel_data())\n"}"#, 200, 180),
+            mturn_text("MPU6050 is at address=0x68, not 0x69.", 260, 240),
         ],
         _ => vec![mturn_text("", 100, 0)],
     }
@@ -347,6 +442,110 @@ fn mturn_text(text: &str, prompt: u64, cached: u64) -> MockTurn {
         prompt_tokens: prompt,
         completion: 50,
         cached,
+    }
+}
+
+#[cfg(test)]
+mod script_invariants {
+    use super::*;
+
+    fn cases_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../eval/cases")
+    }
+
+    fn load_cases() -> Vec<Case> {
+        let mut out = Vec::new();
+        for e in std::fs::read_dir(cases_dir()).expect("eval/cases") {
+            let path = e.expect("entry").path();
+            if path.extension().and_then(|x| x.to_str()) != Some("json") {
+                continue;
+            }
+            let raw = std::fs::read_to_string(&path).unwrap();
+            out.push(
+                serde_json::from_str(&raw)
+                    .unwrap_or_else(|err| panic!("parse {}: {err}", path.display())),
+            );
+        }
+        out
+    }
+
+    fn script_blob(turns: &[MockTurn]) -> String {
+        let mut s = String::new();
+        for t in turns {
+            s.push_str(&t.text);
+            s.push('\n');
+            for call in &t.tool_calls {
+                s.push_str(&call.function.name);
+                s.push(' ');
+                s.push_str(&call.function.arguments);
+                s.push('\n');
+            }
+        }
+        s
+    }
+
+    #[test]
+    fn scripts_cover_all_ids_and_avoid_hallucinated() {
+        let cases = load_cases();
+        assert_eq!(cases.len(), 13);
+        for c in &cases {
+            let turns = script(&c.id);
+            assert!(
+                !turns.is_empty()
+                    && turns
+                        .iter()
+                        .any(|t| !t.tool_calls.is_empty() || !t.text.is_empty()),
+                "{}: expected a real script, not the empty fallback",
+                c.id
+            );
+            let text_blob = turns
+                .iter()
+                .map(|t| t.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+                .to_lowercase();
+            for h in &c.hallucinated {
+                assert!(
+                    !text_blob.contains(&h.to_lowercase()),
+                    "{} terminal text must not contain hallucinated {h:?}\n{}",
+                    c.id,
+                    turns
+                        .iter()
+                        .map(|t| t.text.as_str())
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                );
+            }
+            let used_edit = turns.iter().any(|t| {
+                t.tool_calls
+                    .iter()
+                    .any(|call| call.function.name == "edit_file")
+            });
+            if c.gold.is_hardware_fault {
+                assert!(!used_edit, "{} STOP script must not call edit_file", c.id);
+            } else {
+                assert!(used_edit, "{} file-fix script must call edit_file", c.id);
+                let edits: String = turns
+                    .iter()
+                    .flat_map(|t| t.tool_calls.iter())
+                    .filter(|call| call.function.name == "edit_file")
+                    .map(|call| call.function.arguments.clone())
+                    .collect();
+                for needle in &c.gold.fix_must_contain {
+                    assert!(
+                        edits.contains(needle),
+                        "{} edit_file must contain gold {needle:?}\n{edits}",
+                        c.id
+                    );
+                }
+            }
+        }
+        let chip = script("bmp280-vs-bme280-chipid");
+        let chip_blob = script_blob(&chip);
+        assert!(
+            chip_blob.contains("\"register\":208") || chip_blob.contains("0xD0"),
+            "chip-id script must read register 0xD0, got {chip_blob}"
+        );
     }
 }
 

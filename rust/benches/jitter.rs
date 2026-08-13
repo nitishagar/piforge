@@ -1,9 +1,8 @@
-//! Scope-jitter micro-benchmark — the moat metric. Port of the Go bench so the
-//! Rust vs Go comparison is apples-to-apples.
+//! Scope-jitter micro-benchmark — the moat metric.
 //!
 //! Measures tail latency of an edge-event handler loop at 1ms cadence over a
-//! 2-second window. The Go bench forces a GC every 50 samples to surface
-//! pause impact; Rust has no GC, so this is the suspected win.
+//! 2-second window. A small allocation every 50 samples keeps the allocator
+//! hot; there is no GC pause to force.
 //!
 //! Run: cargo bench --bench jitter
 use criterion::{criterion_group, criterion_main, Criterion};
@@ -30,10 +29,7 @@ fn measure_jitter(dur: Duration, cadence: Duration) -> JitterStats {
         }
         prev = Some(a);
         i += 1;
-        // Rust has no GC to force; this is the control (no forced pause).
-        // The Go bench calls runtime.GC() every 50 here; the Rust win is the
-        // absence of that cost. Leave a small allocation in place to keep the
-        // allocator hot (parity with Go's GC pressure intent).
+        // Small allocation every 50 samples keeps the allocator hot.
         if i % 50 == 0 {
             let _v: Vec<u8> = vec![0; 1024];
             std::hint::black_box(&_v);

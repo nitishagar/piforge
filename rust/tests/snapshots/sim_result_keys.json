@@ -1,5 +1,5 @@
-hardware_inventory: board,gpio_pins
-telemetry: board,core_volts,cpu_temp
+hardware_inventory: board,gpiochips,i2c_bus,i2c_devices,iio,one_wire
+telemetry: cpu_temp,telemetry_known,throttled_raw,under_voltage
 i2c: count,devices
-gpio: pin,value
+gpio: chip,pin,value
 scope: duration_ms,edges,events,events[].edge,events[].t_us,pin,rate_hz

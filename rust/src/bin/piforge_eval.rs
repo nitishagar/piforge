@@ -33,12 +33,16 @@ async fn main() -> Result<()> {
 
     let runner = if args.mock {
         eprintln!("piforge-eval: MOCK mode (scripted provider, no model)");
-        let (r, _mock) = Runner::new_mock(cfg.agent.max_turns);
+        let (r, _mock) = Runner::new_mock(cfg.agent.max_turns, cfg.agent.telemetry_preload);
         r
     } else {
         let client = Arc::new(Client::new(&cfg.server)?);
         client.health_check().await?;
-        Runner::new(client as Arc<dyn LlmClient>, cfg.agent.max_turns)
+        Runner::new(
+            client as Arc<dyn LlmClient>,
+            cfg.agent.max_turns,
+            cfg.agent.telemetry_preload,
+        )
     };
 
     eprintln!("piforge-eval: running cases from {}", cfg.eval.cases_dir);

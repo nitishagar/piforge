@@ -89,3 +89,33 @@ pub trait Gate: Send + Sync {
 
 /// A tool-box convenience.
 pub type ToolVec = Vec<Arc<dyn Tool>>;
+
+/// Unified telemetry snapshot value (sim and hw). `telemetry_known` tracks
+/// throttled-state only — temp `"N/A"` must not flip it. `dmesg_tail` is
+/// omitted when empty.
+pub fn telemetry_snapshot(
+    throttled: Option<u64>,
+    cpu_temp: &str,
+    dmesg_tail: Option<&str>,
+) -> Value {
+    let known = throttled.is_some();
+    let (throttled_raw, under_voltage) = match throttled {
+        Some(val) => (
+            serde_json::json!(format!("0x{val:x}")),
+            serde_json::json!(val & (1 << 0) != 0 || val & (1 << 16) != 0),
+        ),
+        None => (Value::Null, Value::Null),
+    };
+    let mut out = serde_json::json!({
+        "throttled_raw": throttled_raw,
+        "under_voltage": under_voltage,
+        "cpu_temp": cpu_temp,
+        "telemetry_known": known,
+    });
+    if let Some(d) = dmesg_tail {
+        if !d.is_empty() {
+            out["dmesg_tail"] = serde_json::json!(d);
+        }
+    }
+    out
+}

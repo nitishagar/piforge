@@ -127,6 +127,9 @@ impl Runner {
     }
 
     /// Run all *.json cases in `cases_dir`, invoking `progress` per verdict.
+    /// Exclusive and sequential: one case at a time (per-case workspaces are
+    /// pid+case-id keyed), one case's agent per run. A SIGINT classifies the
+    /// in-flight case as `Interrupted` and the remaining cases still run.
     pub async fn run_all<F>(&self, cases_dir: &str, mut progress: F) -> Result<Vec<Verdict>>
     where
         F: FnMut(&Verdict),
@@ -167,6 +170,7 @@ impl Runner {
             Err(e) => {
                 v.error_kind = Some(CaseError::WorkspaceError);
                 v.notes = format!("error: {e}");
+                v.duration_sec = start.elapsed().as_secs_f64();
                 return v;
             }
         };
@@ -308,7 +312,9 @@ pub struct Summary {
     pub total: usize,
     pub passed: usize,
     /// Harness errors (provider/workspace/interrupt) — distinct from model
-    /// failures; a verdict is not recordable with errored > 0.
+    /// failures. The run book treats errored > 0 as not recordable (fix the
+    /// harness, re-run); `decide()` itself is unchanged and still counts
+    /// errored cases as failures.
     pub errored: usize,
     /// Turn-budget non-convergence — model behavior, not a harness error.
     pub non_converged: usize,

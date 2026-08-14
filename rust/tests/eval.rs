@@ -89,6 +89,54 @@ fn summarize_aggregates() {
     assert_eq!(s.median_turns, 3, "median of {{2,3,4}}");
 }
 
+#[test]
+fn summarize_mixed_batch_preserves_denominator() {
+    // Mixed batch: 8 pass, 1 hallucination-fail, 2 provider-errored, 1
+    // turn-budget non-converged. Every case stays in the pass_rate
+    // denominator (comparability with prior runs); the attribution split
+    // separates harness errors from model failures without moving the rate.
+    let mk = |pass_: bool| Verdict {
+        pass_,
+        ..Default::default()
+    };
+    let vs: Vec<Verdict> = vec![
+        mk(true),
+        mk(true),
+        mk(true),
+        mk(true),
+        mk(true),
+        mk(true),
+        mk(true),
+        mk(true),
+        Verdict {
+            pass_: false,
+            hallucination: true,
+            ..Default::default()
+        },
+        Verdict {
+            pass_: false,
+            error_kind: Some(CaseError::ProviderFailure),
+            ..Default::default()
+        },
+        Verdict {
+            pass_: false,
+            error_kind: Some(CaseError::Interrupted),
+            ..Default::default()
+        },
+        Verdict {
+            pass_: false,
+            error_kind: Some(CaseError::TurnBudgetExhausted),
+            ..Default::default()
+        },
+    ];
+    let s = summarize(&vs);
+    assert_eq!(s.total, 12);
+    assert_eq!(s.passed, 8);
+    assert_eq!(s.errored, 2, "provider + interrupt are harness errors");
+    assert_eq!(s.non_converged, 1, "turn budget is model non-convergence");
+    assert!((s.pass_rate - 8.0 / 12.0).abs() < 1e-9, "{}", s.pass_rate);
+}
+
 // Suppress unused-warning for Setup import kept for parity with other tests.
 #[allow(dead_code)]
 fn _setup() -> Setup {

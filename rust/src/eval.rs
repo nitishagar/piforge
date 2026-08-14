@@ -93,7 +93,9 @@ impl Runner {
     {
         let mut entries: Vec<_> = std::fs::read_dir(cases_dir)
             .map_err(|e| anyhow!("read cases dir {cases_dir}: {e}"))?
-            .filter_map(|e| e.ok())
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(|e| anyhow!("read cases dir {cases_dir}: {e}"))?
+            .into_iter()
             .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("json"))
             .collect();
         entries.sort_by_key(|e| e.path());
@@ -329,6 +331,9 @@ fn temp_workspace(
     ));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir)?;
+    // Guard before seeding: a mid-seed failure must still Drop-clean the dir
+    // (it is pid-keyed — a later process will not reclaim it).
+    let guard = WorkspaceGuard { path: dir.clone() };
     for (rel, content) in files {
         let abs = dir.join(rel);
         if let Some(parent) = abs.parent() {
@@ -336,7 +341,7 @@ fn temp_workspace(
         }
         std::fs::write(&abs, content)?;
     }
-    Ok(WorkspaceGuard { path: dir })
+    Ok(guard)
 }
 
 fn truncate(s: &str, n: usize) -> String {

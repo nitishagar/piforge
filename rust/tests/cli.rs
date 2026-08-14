@@ -63,6 +63,9 @@ fn tool_gpio_set_denied_with_piped_stdin() {
             "--args",
             r#"{"action":"set","pin":17,"value":1}"#,
         ])
+        // Explicit null stdin: the deny must be deterministic regardless of
+        // whether the test harness itself runs on a TTY.
+        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()

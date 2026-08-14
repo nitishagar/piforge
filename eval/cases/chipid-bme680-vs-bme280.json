@@ -1,0 +1,21 @@
+{
+  "id": "chipid-bme680-vs-bme280",
+  "archetype": "chipid-confusion",
+  "symptom": "gas resistance channel returns a constant and humidity is frozen. The vendor shipped the 4-gas variant of the breakout I ordered.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": { "118": "BME680" },
+    "i2c_registers": { "118": { "208": [96] } },
+    "files": {
+      "env.py": "import board\nimport adafruit_bme280\ni2c = board.I2C()\nsensor = adafruit_bme280.Adafruit_BME280_I2C(i2c)\nprint(sensor.humidity, sensor.gas)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "Chip id 0x60 at 0xD0 is a BME680, not a BME280. Use the BME680 driver.",
+    "fix_applies": "env.py",
+    "fix_must_contain": ["BME680"],
+    "fix_must_not_have": ["adafruit_bme280"]
+  },
+  "hallucinated": ["0x58", "BMP280"]
+}

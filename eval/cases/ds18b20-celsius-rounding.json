@@ -1,0 +1,20 @@
+{
+  "id": "ds18b20-celsius-rounding",
+  "archetype": "unit-conversion",
+  "symptom": "temperature prints as 22 instead of 22.5-ish; the sensor is fine per another tool.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "one_wire": ["28-00000a1b2c3d"],
+    "files": {
+      "temp.py": "line = open(\"/sys/bus/w1/devices/28-00000a1b2c3d/w1_slave\").read()\nraw = int(line.split(\"t=\")[1])\nprint(int(raw / 1000))\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "The w1_slave t= value is milli-degrees C; integer division truncates. Use raw / 1000.0 and round for display.",
+    "fix_applies": "temp.py",
+    "fix_must_contain": ["/ 1000.0"],
+    "fix_must_not_have": ["int(raw / 1000)"]
+  },
+  "hallucinated": []
+}

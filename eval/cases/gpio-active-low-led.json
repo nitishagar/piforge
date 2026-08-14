@@ -1,0 +1,20 @@
+{
+  "id": "gpio-active-low-led",
+  "archetype": "gpio-polarity",
+  "symptom": "my LED is ON when the script starts and goes dark when I call on(). The breakout is one of those relay-style active-low modules.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "gpio_pins": { "17": "LED module (active-low)" },
+    "files": {
+      "led.py": "from gpiozero import LED\nfrom time import sleep\nled = LED(17)\nwhile True:\n    led.on()\n    sleep(0.5)\n    led.off()\n    sleep(0.5)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "The module is active-low: the pin must go LOW to switch the LED on. Use LED(17, active_state=False) or invert the logic.",
+    "fix_applies": "led.py",
+    "fix_must_contain": ["active_state=False"],
+    "fix_must_not_have": []
+  },
+  "hallucinated": ["pull_up=True"]
+}

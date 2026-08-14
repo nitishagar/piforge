@@ -115,9 +115,11 @@ non-converged/total call). The workflow mirrors the cactus probe:
    `bench/cloud-probe-<provider>.md`; config-fix any divergence (e.g. a model id
    that rejects `tool_choice`).
 2. **Run the gate**: with the cloud `piforge.toml` + `PIFORGE_API_KEY`, run the
-   mock precondition first (`piforge-eval --mock` must be 40/40), then the real
-   run (`piforge-eval` with no `--mock`). Capture the summary + per-case verdicts
-   in `bench/REAL_EVAL_cloud_<date>.md`.
+   mock precondition first (`piforge-eval --mock` must pass every case and
+   decide `BUILD_LOCAL` — a non-zero exit is a harness regression), then the
+   real run (`piforge-eval` with no `--mock`; pass `--trace-dir` to keep a
+   per-case JSONL record for the verdict). Capture the summary + per-case
+   verdicts in `bench/REAL_EVAL_cloud_<date>.md`.
 
 The verdict reflects the cloud model's real capability under the unchanged
 scoring rules — a capable model is expected to `BUILD_LOCAL`; if it doesn't,

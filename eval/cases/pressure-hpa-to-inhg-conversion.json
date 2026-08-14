@@ -1,0 +1,20 @@
+{
+  "id": "pressure-hpa-to-inhg-conversion",
+  "archetype": "unit-conversion",
+  "symptom": "the barometer display says ~1013 like the hPa number but the app expects inches of mercury (~29.9).",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": { "118": "BME280" },
+    "files": {
+      "display.py": "hpa = sensor.pressure\ninhg = hpa\nprint(inhg)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "The driver reports hPa; inHg needs hPa * 0.02953.",
+    "fix_applies": "display.py",
+    "fix_must_contain": ["0.02953"],
+    "fix_must_not_have": []
+  },
+  "hallucinated": []
+}

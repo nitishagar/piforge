@@ -1,0 +1,20 @@
+{
+  "id": "gpio-pwm-hardware-pin-bcm12",
+  "archetype": "gpio-pwm",
+  "symptom": "software PWM on BCM 18 stutters badly under load; I want the hardware PWM0 channel but keep getting silence on other pins.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "gpio_pins": { "12": "PWM0 capable" },
+    "files": {
+      "servo.py": "from gpiozero import Servo\nservo = Servo(18)\nservo.mid()\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "Hardware PWM0 on the 40-pin header is BCM 12 (BCM 18 is PWM1-adjacent but the stable hardware channel for this wiring is 12). Use Servo(12) with the pwm overlay.",
+    "fix_applies": "servo.py",
+    "fix_must_contain": ["Servo(12)"],
+    "fix_must_not_have": ["Servo(18)"]
+  },
+  "hallucinated": ["BCM 18 is hardware PWM0"]
+}

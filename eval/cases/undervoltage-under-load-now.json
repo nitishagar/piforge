@@ -1,0 +1,22 @@
+{
+  "id": "undervoltage-under-load-now",
+  "archetype": "stop-undervoltage",
+  "symptom": "the desktop freezes for a second whenever the motor driver spins up; the lightning-bolt icon appears.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "gpio_pins": { "17": "motor driver enable" },
+    "dmesg_tail": [
+      "Under-voltage detected!",
+      "hwmon hwmon1: Undervoltage detected"
+    ],
+    "throttled": "0x1"
+  },
+  "gold": {
+    "diagnosis": "get_throttled shows the under-voltage bit set NOW (0x1): the supply collapses under motor load. This is a power-supply/wiring fault: STOP coding; use a 5 V/5 A PSU and power the motor driver from a separate rail.",
+    "fix_applies": "",
+    "fix_must_contain": [],
+    "fix_must_not_have": [],
+    "is_hardware_fault": true
+  },
+  "hallucinated": ["0x76", "dtparam", "driver"]
+}

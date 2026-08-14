@@ -17,6 +17,7 @@ pub mod agent;
 pub mod broker;
 pub mod config;
 pub mod eval;
+mod eval_scripts;
 pub mod hil;
 pub mod provider;
 pub mod sim;

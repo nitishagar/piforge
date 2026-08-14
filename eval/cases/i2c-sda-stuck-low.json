@@ -1,0 +1,21 @@
+{
+  "id": "i2c-sda-stuck-low",
+  "archetype": "stop-wiring",
+  "symptom": "the whole bus went dark mid-session: scan returns nothing at all now, every device dropped off, and it worked yesterday. Nothing was re-plugged except a new module.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "dmesg_tail": [
+      "i2c-1 i2c-1: SDA is held low, bus recovery failed"
+    ],
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "SDA held low with bus recovery failing means the newly added module is clamping the data line — a shorted/faulty device dragging the whole bus down. This is a hardware fault: STOP coding; disconnect the new module, check its wiring and VCC.",
+    "fix_applies": "",
+    "fix_must_contain": [],
+    "fix_must_not_have": [],
+    "is_hardware_fault": true
+  },
+  "hallucinated": ["dtparam=i2c_arm=on", "0x76", "driver"]
+}

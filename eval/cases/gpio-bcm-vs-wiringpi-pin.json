@@ -1,0 +1,20 @@
+{
+  "id": "gpio-bcm-vs-wiringpi-pin",
+  "archetype": "gpio-numbering",
+  "symptom": "moved my wiringPi C program to Python on the same wiring and the LED on BCM 17 never lights. wiringPi pin 0 worked before.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "gpio_pins": { "17": "LED" },
+    "files": {
+      "blink.py": "import wiringpi\nwiringpi.wiringPiSetup()\nwiringpi.pinMode(0, 1)\nwhile True:\n    wiringpi.digitalWrite(0, 1)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "wiringPi numbering is its own virtual scheme (pin 0), not BCM. On the Pi 5 use gpiozero with BCM numbers: LED(17).",
+    "fix_applies": "blink.py",
+    "fix_must_contain": ["LED(17)"],
+    "fix_must_not_have": ["wiringpi"]
+  },
+  "hallucinated": ["LED(0)", "BOARD"]
+}

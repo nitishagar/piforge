@@ -1,0 +1,21 @@
+{
+  "id": "chipid-bmp390-vs-bmp280",
+  "archetype": "chipid-confusion",
+  "symptom": "my pressure sensor reads nonsense values. I bought it as a 390 but the example sketch I copied is for the older chip and I suspect the driver.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": { "118": "BMP390" },
+    "i2c_registers": { "118": { "0": [80] } },
+    "files": {
+      "pressure.py": "import board\nimport adafruit_bmp280\ni2c = board.I2C()\nsensor = adafruit_bmp280.Adafruit_BMP280_I2C(i2c)\nprint(sensor.pressure)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "Chip id 0x50 at register 0x00 is a BMP390; the code uses the BMP280 driver. Switch to the BMP3XX driver.",
+    "fix_applies": "pressure.py",
+    "fix_must_contain": ["BMP3XX"],
+    "fix_must_not_have": ["adafruit_bmp280"]
+  },
+  "hallucinated": ["0x58", "0xD0"]
+}

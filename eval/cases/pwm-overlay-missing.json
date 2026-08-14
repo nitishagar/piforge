@@ -1,0 +1,20 @@
+{
+  "id": "pwm-overlay-missing",
+  "archetype": "overlay-missing",
+  "symptom": "hardware PWM cannot be claimed; pwm-unexported shows nothing and my LED dimmer falls back to software.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "gpio_pins": { "12": "PWM0 capable" },
+    "files": {
+      "config.txt": "arm_64bit=1\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "The PWM peripheral needs its device-tree overlay: add dtoverlay=pwm to config.txt.",
+    "fix_applies": "config.txt",
+    "fix_must_contain": ["dtoverlay=pwm"],
+    "fix_must_not_have": []
+  },
+  "hallucinated": ["dtoverlay=w1-gpio"]
+}

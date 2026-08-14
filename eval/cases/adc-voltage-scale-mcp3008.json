@@ -1,0 +1,20 @@
+{
+  "id": "adc-voltage-scale-mcp3008",
+  "archetype": "adc-scale",
+  "symptom": "potentiometer readings max out near 512 instead of tracking 0-3.3 V. The code divides by 1024 which looks off for this 10-bit chip.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "iio": [ { "name": "mcp3008", "raw": 512, "scale": 0.0032258064 } ],
+    "files": {
+      "mcp.py": "raw = int(open(\"/sys/bus/iio/devices/iio:device0/in_voltage0_raw\").read())\nvolts = raw / 1024\nprint(volts)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "10-bit counts with 3.3 V reference: multiply by the channel scale (3.3/1023) from in_voltage_scale instead of dividing by 1024.",
+    "fix_applies": "mcp.py",
+    "fix_must_contain": ["raw * scale"],
+    "fix_must_not_have": ["/ 1024"]
+  },
+  "hallucinated": []
+}

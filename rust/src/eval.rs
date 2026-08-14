@@ -10,10 +10,10 @@ use std::path::PathBuf;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::agent::{Agent, LlmClient, MockProvider, MockTurn, RunError, TraceEvent};
+use crate::agent::{Agent, LlmClient, MockProvider, RunError, TraceEvent};
 use crate::broker::{Broker, ThrottledReader};
+use crate::eval_scripts::script;
 use crate::hil::ToolVec;
-use crate::provider::ToolCall;
 use crate::sim::{self, CodeEditTool, Setup, State};
 
 /// One eval fixture.
@@ -461,102 +461,10 @@ fn truncate(s: &str, n: usize) -> String {
     }
 }
 
-/// Scripted mock turns for all 13 case ids. Unknown ids get an empty terminal turn.
-fn script(case_id: &str) -> Vec<MockTurn> {
-    match case_id {
-        "wrong-i2c-address-bme280-0x76" => vec![
-            mturn_call("i2c", r#"{"action":"scan"}"#, 120, 0),
-            mturn_call("i2c", r#"{"action":"detect","address":118}"#, 200, 180),
-            mturn_call("edit_file", r#"{"path":"bme_simpletest.py","content":"from board import *\nfrom adafruit_bme280 import basic as adafruit_bme280\ni2c = I2C(scl, sda)\nbme = adafruit_bme280.Adafruit_BME280_I2C(i2c, address=0x76)\nprint(bme.humidity)\n"}"#, 280, 260),
-            mturn_text("Fixed: BME280 is at 0x76, not the default 0x77. Set address=0x76.", 320, 300),
-        ],
-        "i2c-wrong-address-0x77" => vec![
-            mturn_call("hardware_inventory", r#"{}"#, 110, 0),
-            mturn_call("i2c", r#"{"action":"scan"}"#, 180, 160),
-            mturn_text("i2cdetect is empty even though the header has 3.3 V — SDA/SCL look swapped. This is a wiring fault. STOP coding; rewire the I2C pins.", 240, 220),
-        ],
-        "i2c-bus-scan-all-addresses" => vec![
-            mturn_call("i2c", r#"{"action":"scan"}"#, 120, 100),
-            mturn_text("i2cdetect shows every address responding — that means SDA/SCL are shorted to power. This is a hardware/wiring fault. STOP coding; check the wiring and pull-ups before any further I2C op.", 200, 180),
-        ],
-        "undervoltage-brownout" => vec![
-            mturn_call("telemetry", r#"{"action":"snapshot"}"#, 130, 110),
-            mturn_text("vcgencmd get_throttled shows undervoltage has occurred (bit 16). This is a power-supply problem, not code — use a 5V/3A+ PSU and don't power servos from the 3.3V rail. STOP coding.", 210, 190),
-        ],
-        "gpio-board-vs-bcm-numbering" => vec![
-            mturn_call("edit_file", r#"{"path":"blink.py","content":"from gpiozero import LED\nfrom time import sleep\nled = LED(17)\nwhile True:\n    led.on()\n    sleep(0.5)\n    led.off()\n    sleep(0.5)\n"}"#, 200, 180),
-            mturn_text("gpiozero uses BCM numbering. Physical pin 11 is BCM 17; use LED(17).", 260, 240),
-        ],
-        "pi5-rpigpio-migration-break" => vec![
-            mturn_call("edit_file", r#"{"path":"app.py","content":"from gpiozero import LED\nled = LED(17)\nled.on()\n"}"#, 200, 180),
-            mturn_text("RPi.GPIO cannot drive Pi 5 GPIO. Rewrote with gpiozero.", 260, 240),
-        ],
-        "servo-jitter-software-pwm" => vec![
-            mturn_call("edit_file", r#"{"path":"servo.py","content":"from gpiozero import Servo\nfrom time import sleep\nservo = Servo(17)\nwhile True:\n    sleep(1)\n"}"#, 200, 180),
-            mturn_text("Software PWM jitters under Linux. Use gpiozero Servo (hardware-timed on Pi 5).", 260, 240),
-        ],
-        "bmp280-vs-bme280-chipid" => vec![
-            mturn_call("i2c", r#"{"action":"read","address":118,"register":208,"length":1}"#, 120, 0),
-            mturn_call("edit_file", r#"{"path":"bme.py","content":"from board import *\nimport adafruit_bmp280\ni2c = I2C(scl, sda)\nbmp = adafruit_bmp280.Adafruit_BMP280_I2C(i2c, address=0x76)\nprint(bmp.pressure)\n"}"#, 200, 180),
-            mturn_text("Chip-id 0x58 at 0xD0 is a BMP280, not a BME280. Switched to the BMP280 driver.", 260, 240),
-        ],
-        "bme280-pressure-unit-conversion" => vec![
-            mturn_call("edit_file", r#"{"path":"bme_read.py","content":"def read_pressure(reg_bytes):\n    raw = int.from_bytes(reg_bytes, 'big')\n    return raw * 100  # hPa to Pa\n"}"#, 200, 180),
-            mturn_text("Pressure was in hPa; multiply by 100 to report Pa.", 260, 240),
-        ],
-        "i2c-not-enabled" => vec![
-            mturn_call("i2c", r#"{"action":"scan"}"#, 120, 0),
-            mturn_call("edit_file", r#"{"path":"config.txt","content":"arm_64bit=1\ndtparam=i2c_arm=on\n"}"#, 200, 180),
-            mturn_text("I2C overlay was off. Added dtparam=i2c_arm=on to workspace config.txt.", 260, 240),
-        ],
-        "ds18b20-1wire-overlay-missing" => vec![
-            mturn_call("hardware_inventory", r#"{}"#, 110, 0),
-            mturn_call("edit_file", r#"{"path":"config.txt","content":"arm_64bit=1\ndtoverlay=w1-gpio\n"}"#, 200, 180),
-            mturn_text("1-wire overlay missing. Added dtoverlay=w1-gpio to workspace config.txt.", 260, 240),
-        ],
-        "iio-scale-misapply" => vec![
-            mturn_call("hardware_inventory", r#"{}"#, 110, 0),
-            mturn_call("edit_file", r#"{"path":"adc_read.py","content":"raw = int(open(\"/sys/bus/iio/devices/iio:device0/in_voltage0_raw\").read())\nscale = float(open(\"/sys/bus/iio/devices/iio:device0/in_voltage_scale\").read())\nprint(raw * scale / 1000)\n"}"#, 200, 180),
-            mturn_text("Raw IIO counts must be multiplied by in_voltage_scale.", 260, 240),
-        ],
-        "i2c-device-not-found-timeout" => vec![
-            mturn_call("i2c", r#"{"action":"scan"}"#, 120, 0),
-            mturn_call("edit_file", r#"{"path":"mpu.py","content":"from mpu6050 import MPU6050\nsensor = MPU6050(address=0x68)\nprint(sensor.get_accel_data())\n"}"#, 200, 180),
-            mturn_text("MPU6050 is at address=0x68, not 0x69.", 260, 240),
-        ],
-        _ => vec![mturn_text("", 100, 0)],
-    }
-}
-
-fn mturn_call(name: &str, args: &str, prompt: u64, cached: u64) -> MockTurn {
-    MockTurn {
-        tool_calls: vec![ToolCall {
-            id: format!("{name}-1"),
-            kind: "function".into(),
-            function: crate::provider::ToolCallFunction {
-                name: name.into(),
-                arguments: args.into(),
-            },
-        }],
-        text: String::new(),
-        prompt_tokens: prompt,
-        completion: 50,
-        cached,
-    }
-}
-fn mturn_text(text: &str, prompt: u64, cached: u64) -> MockTurn {
-    MockTurn {
-        tool_calls: vec![],
-        text: text.into(),
-        prompt_tokens: prompt,
-        completion: 50,
-        cached,
-    }
-}
-
 #[cfg(test)]
 mod script_invariants {
     use super::*;
+    use crate::agent::MockTurn;
 
     fn cases_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../eval/cases")
@@ -596,7 +504,11 @@ mod script_invariants {
     #[test]
     fn scripts_cover_all_ids_and_avoid_hallucinated() {
         let cases = load_cases();
-        assert_eq!(cases.len(), 13);
+        assert!(
+            cases.len() >= 40,
+            "the gate corpus is at least 40 fixtures (coverage floor), got {}",
+            cases.len()
+        );
         for c in &cases {
             let turns = script(&c.id);
             assert!(

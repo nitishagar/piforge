@@ -1,0 +1,20 @@
+{
+  "id": "temperature-c-to-f-conversion",
+  "archetype": "unit-conversion",
+  "symptom": "my Fahrenheit readout is always too low — about 20 degrees under what the phone weather app says for the same room.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "iio": [ { "name": "tmp36", "raw": 1552, "scale": 0.001 } ],
+    "files": {
+      "weather.py": "c = read_celsius()\nf = c * 2 + 32\nprint(f)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "C to F is c * 9 / 5 + 32, not c * 2 + 32.",
+    "fix_applies": "weather.py",
+    "fix_must_contain": ["* 9 / 5 + 32"],
+    "fix_must_not_have": ["* 2 + 32"]
+  },
+  "hallucinated": []
+}

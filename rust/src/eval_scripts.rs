@@ -105,8 +105,8 @@ pub(crate) fn script(case_id: &str) -> Vec<MockTurn> {
             mturn_text("Button to ground needs the internal pull-up and debouncing: pull_up=True + bounce_time.", 260, 240),
         ],
         "gpio-bcm-vs-wiringpi-pin" => vec![
-            mturn_call("edit_file", r#"{"path":"blink.py","content":"from gpiozero import LED\nfrom time import sleep\nled = LED(17)\nwhile True:\n    led.on()\n    sleep(0.5)\n    led.off()\n    sleep(0.5)\n"}"#, 200, 180),
-            mturn_text("wiringPi pin 0 is its own virtual scheme, not BCM. On the Pi 5 use gpiozero: LED(17).", 260, 240),
+            mturn_call("edit_file", r#"{"path":"blink.py","content":"from gpiozero import PWMLED\nled = PWMLED(17)\nled.pulse()\n"}"#, 200, 180),
+            mturn_text("wiringPi pin 0 is its own virtual scheme, not BCM. On the Pi 5 use gpiozero with BCM numbers: PWMLED(17).", 260, 240),
         ],
         "gpio-pwm-hardware-pin-bcm12" => vec![
             mturn_call("edit_file", r#"{"path":"servo.py","content":"from gpiozero import Servo\nservo = Servo(12)\nservo.mid()\n"}"#, 200, 180),

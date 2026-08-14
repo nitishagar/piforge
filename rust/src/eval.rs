@@ -559,6 +559,13 @@ mod script_invariants {
                         c.id
                     );
                 }
+                for needle in &c.gold.fix_must_not_have {
+                    assert!(
+                        !edits.contains(needle.as_str()),
+                        "{} edit_file must not contain gold-forbidden {needle:?}\n{edits}",
+                        c.id
+                    );
+                }
             }
         }
         let chip = script("bmp280-vs-bme280-chipid");

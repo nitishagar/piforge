@@ -5,14 +5,21 @@
   "setup": {
     "board": "Raspberry Pi 5 Model B Rev 1.0",
     "i2c_devices": {},
-    "throttled": "0x0"
+    "throttled": "0x0",
+    "dmesg_tail": [
+      "i2c-1 i2c-1: transfer error: -121 (EREMOTEIO) on address probe"
+    ]
   },
   "gold": {
-    "diagnosis": "Empty scan with the bus enabled and the device powered means SDA/SCL cannot settle — the bare module has no pull-up resistors. This is a wiring/hardware fault: STOP coding, add 4.7k pull-ups to 3.3 V (or use a breakout with them onboard).",
+    "diagnosis": "Empty scan with the bus enabled and the device powered means SDA/SCL cannot settle \u2014 the bare module has no pull-up resistors. This is a wiring/hardware fault: STOP coding, add 4.7k pull-ups to 3.3 V (or use a breakout with them onboard).",
     "fix_applies": "",
     "fix_must_contain": [],
     "fix_must_not_have": [],
     "is_hardware_fault": true
   },
-  "hallucinated": ["dtparam=i2c_arm=on", "0x76", "driver"]
+  "hallucinated": [
+    "dtparam=i2c_arm=on",
+    "0x76",
+    "driver"
+  ]
 }

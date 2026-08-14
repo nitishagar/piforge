@@ -119,7 +119,7 @@ impl Gate for Broker {
         // 3. Scoped arm cache.
         let key = arm_key(physical, &detail);
         {
-            let mut armed = self.armed.lock();
+            let armed = self.armed.lock();
             if let Some(exp) = armed.get(&key) {
                 if Instant::now() < *exp {
                     return Ok(()); // armed within the window
@@ -172,5 +172,5 @@ fn format_prompt(physical: &str, detail: &Value, risk: &str) -> String {
             bits.push_str(&format!(" {k}={v}"));
         }
     }
-    format!("[PiForge {risk}]{bits} approve? (y/N): ")
+    format!("[PiForge {risk}] {physical}{bits} approve? (y/N): ")
 }

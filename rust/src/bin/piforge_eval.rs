@@ -59,11 +59,10 @@ async fn main() -> Result<()> {
         .await?;
 
     if verdicts.is_empty() {
-        eprintln!(
+        anyhow::bail!(
             "no cases found — add fixtures under {}/*.json",
             cfg.eval.cases_dir
         );
-        return Ok(());
     }
 
     let s = summarize(&verdicts);
@@ -90,5 +89,12 @@ async fn main() -> Result<()> {
         cfg.eval.hallucination_threshold * 100.0
     );
     println!("DECISION: {decision}");
+    if args.mock {
+        // Mock scripts hit gold by construction: any failure or a non-BUILD
+        // decision is a harness regression and must fail CI (exit contract).
+        if verdicts.iter().any(|v| !v.pass_) || decision != "BUILD_LOCAL" {
+            anyhow::bail!("mock parity violated: every case must pass and decide BUILD_LOCAL");
+        }
+    }
     Ok(())
 }

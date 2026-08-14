@@ -13,10 +13,6 @@ fn decide_gate_thresholds() {
         (0.55, 0.10, 0.55, 0.10, "BUILD_LOCAL"), // exactly at threshold
     ];
     for (pr, hr, pt, ht, want) in cases {
-        let s = summarize(&[Verdict {
-            pass_: pr > 0.5,
-            ..Default::default()
-        }]);
         // Build a synthetic summary with the rates directly (summarize computes
         // rates from verdicts; for threshold tests use a manual summary).
         let s = piforge::eval::Summary {

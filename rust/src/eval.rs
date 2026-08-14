@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::agent::{Agent, LlmClient, MockProvider, MockTurn};
 use crate::broker::{Broker, ThrottledReader};
-use crate::config::{Config, EvalConfig};
 use crate::hil::ToolVec;
 use crate::provider::ToolCall;
 use crate::sim::{self, CodeEditTool, Setup, State};
@@ -136,8 +135,6 @@ impl Runner {
             crate::config::SafetyConfig {
                 arm_mode: "auto".into(), // eval/batch; main validates the env guard
                 stop_on_under_voltage: true,
-                per_pin_max_current_ma: 12,
-                rail_budget_ma: 50,
             },
             Some(st_reader),
             Broker::always_deny(),
@@ -548,7 +545,3 @@ mod script_invariants {
         );
     }
 }
-
-// keep the unused-config import warning quiet when only mock mode is exercised
-#[allow(dead_code)]
-fn _unused(_c: &Config, _e: &EvalConfig) {}

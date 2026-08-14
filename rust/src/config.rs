@@ -8,7 +8,7 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
 /// Top-level configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
     pub model: ModelConfig,
@@ -17,19 +17,6 @@ pub struct Config {
     pub hardware: HardwareConfig,
     pub safety: SafetyConfig,
     pub eval: EvalConfig,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            model: ModelConfig::default(),
-            server: ServerConfig::default(),
-            agent: AgentConfig::default(),
-            hardware: HardwareConfig::default(),
-            safety: SafetyConfig::default(),
-            eval: EvalConfig::default(),
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -132,10 +119,6 @@ impl Default for HardwareConfig {
 pub struct SafetyConfig {
     /// "confirm" (default) | "auto" (DANGEROUS; needs PIFORGE_ALLOW_AUTO_ARM=1).
     pub arm_mode: String,
-    /// RP1 register max is 12mA; do not raise.
-    pub per_pin_max_current_ma: u32,
-    /// Conservative guideline (no RP1 spec published).
-    pub rail_budget_ma: u32,
     pub stop_on_under_voltage: bool,
 }
 
@@ -143,8 +126,6 @@ impl Default for SafetyConfig {
     fn default() -> Self {
         Self {
             arm_mode: "confirm".into(),
-            per_pin_max_current_ma: 12,
-            rail_budget_ma: 50,
             stop_on_under_voltage: true,
         }
     }
@@ -357,12 +338,6 @@ impl Config {
             return Err(anyhow!(
                 "model.context {} too small (min 512)",
                 self.model.context
-            ));
-        }
-        if self.safety.per_pin_max_current_ma > 12 {
-            return Err(anyhow!(
-                "safety.per_pin_max_current_ma {} exceeds RP1 max of 12mA",
-                self.safety.per_pin_max_current_ma
             ));
         }
         if self.safety.arm_mode == "auto"

@@ -30,8 +30,6 @@ fn auto_cfg() -> SafetyConfig {
     SafetyConfig {
         arm_mode: "auto".into(),
         stop_on_under_voltage: true,
-        per_pin_max_current_ma: 12,
-        rail_budget_ma: 50,
     }
 }
 
@@ -73,10 +71,27 @@ fn confirm_deny_blocks() {
     let cfg = SafetyConfig {
         arm_mode: "confirm".into(),
         stop_on_under_voltage: true,
-        ..Default::default()
     };
     let g = Broker::new(cfg, Some(stub(true, false, false)), Arc::new(|_| false));
     assert!(g.allow("gpio_set", json!({"pin":17,"value":1})).is_err());
+}
+
+#[test]
+fn confirm_deny_names_op_and_risk() {
+    // The refusal must name the op + risk tier so an operator sees what was
+    // refused (and the CLI deny path has a deterministic string to pin).
+    let cfg = SafetyConfig {
+        arm_mode: "confirm".into(),
+        stop_on_under_voltage: true,
+    };
+    let g = Broker::new(cfg, Some(stub(true, false, false)), Arc::new(|_| false));
+    let err = g
+        .allow("gpio_set", json!({"pin":17,"value":1}))
+        .unwrap_err();
+    assert!(
+        err.contains("DENIED by user (op=gpio_set risk=I/level1)"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -84,7 +99,6 @@ fn scoped_arm_re_approves_same_pin_within_window() {
     let cfg = SafetyConfig {
         arm_mode: "confirm".into(),
         stop_on_under_voltage: true,
-        ..Default::default()
     };
     let counter = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let c2 = counter.clone();

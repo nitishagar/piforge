@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
-use crate::hil::{Tool, ToolVec};
+use crate::hil::ToolVec;
 use crate::provider::{ChatMessage, ChatRequest, ChatResponse, Client, Tool as ProvTool, ToolCall};
 
 /// Minimal interface the agent loop needs from a model provider. Satisfied by
@@ -209,9 +209,11 @@ impl Agent {
 }
 
 /// A mutex-guarded mock LLM client for the eval harness.
+#[derive(Default)]
 pub struct MockProvider {
     inner: Mutex<MockInner>,
 }
+#[derive(Default)]
 struct MockInner {
     turns: Vec<MockTurn>,
     pos: usize,

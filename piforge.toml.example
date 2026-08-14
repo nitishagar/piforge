@@ -57,8 +57,6 @@ i2c_bus = "/dev/i2c-1"
 # "confirm" = per-Class-I human confirm (default, safe).
 # "auto" = auto-approve all (DANGEROUS; eval/batch only; requires PIFORGE_ALLOW_AUTO_ARM=1).
 arm_mode = "confirm"
-per_pin_max_current_ma = 12  # RP1 max; do not raise
-rail_budget_ma = 50          # conservative guideline, not an RP1 spec
 stop_on_under_voltage = true
 
 [eval]

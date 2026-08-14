@@ -151,7 +151,7 @@ async fn sim_result_keys_stable() {
             .find(|t| t.name() == *name)
             .unwrap_or_else(|| panic!("tool {name} present"));
         let res = tool.execute(args).await;
-        let value = res.value.clone().unwrap_or_else(|| Value::Null);
+        let value = res.value.clone().unwrap_or(Value::Null);
         assert!(res.ok, "`{name}` returned an error: {:?}", res.error);
         lines.push(format!("{name}: {}", key_set(&value)));
     }

@@ -60,3 +60,9 @@ jobs:
         run: cargo build --release --features hw --target aarch64-unknown-linux-gnu --bin piforge
       - name: Verify ELF
         run: file target/aarch64-unknown-linux-gnu/release/piforge
+      - name: Upload arm64 hw binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: piforge-arm64
+          path: rust/target/aarch64-unknown-linux-gnu/release/piforge
+          if-no-files-found: error

@@ -1,7 +1,23 @@
 //! Eval scorer + decision-rule tests.
 //! The key regression: word-boundary diagnosis matching must not overmatch
 //! ("default" must NOT trip "fault", "powered" must NOT trip "power").
-use piforge::eval::{decide, summarize, Verdict};
+// run_all over the shared ../eval/cases corpus uses pid+case-id-keyed temp
+// workspaces; tests doing so are serialized so concurrent runs don't collide
+// on the same workspace dir. The lock deliberately spans awaits.
+#![allow(clippy::await_holding_lock)]
+
+use std::sync::{Arc, Mutex};
+
+use async_trait::async_trait;
+
+use piforge::agent::LlmClient;
+use piforge::eval::{decide, summarize, CaseError, Runner, Verdict};
+
+static EVAL_RUN_LOCK: Mutex<()> = Mutex::new(());
+
+fn shared_cases_dir() -> String {
+    format!("{}/../eval/cases", env!("CARGO_MANIFEST_DIR"))
+}
 
 #[test]
 fn decide_gate_thresholds() {
@@ -18,6 +34,8 @@ fn decide_gate_thresholds() {
         let s = piforge::eval::Summary {
             total: 1,
             passed: 1,
+            errored: 0,
+            non_converged: 0,
             partial: 0,
             hallucinated: 0,
             pass_rate: pr,
@@ -187,4 +205,166 @@ async fn malformed_gold_overwrites_notes() {
         vs[0].notes
     );
     let _ = std::fs::remove_dir_all(&root);
+}
+
+// ---- failure attribution + run trace ----
+
+/// LLM stub whose every chat call fails — the provider-failure path.
+struct FailingClient;
+
+#[async_trait]
+impl LlmClient for FailingClient {
+    async fn chat(
+        &self,
+        _req: &piforge::provider::ChatRequest,
+    ) -> anyhow::Result<piforge::provider::ChatResponse> {
+        anyhow::bail!("HTTP 503 (stub)")
+    }
+}
+
+#[tokio::test]
+async fn provider_failure_attributes_as_harness_error() {
+    let _lock = EVAL_RUN_LOCK.lock().unwrap();
+    let runner = Runner::new(Arc::new(FailingClient) as Arc<dyn LlmClient>, 4, false);
+    let vs = runner
+        .run_all(&shared_cases_dir(), |_| ())
+        .await
+        .expect("run_all");
+    assert!(!vs.is_empty());
+    for v in &vs {
+        assert_eq!(
+            v.error_kind,
+            Some(CaseError::ProviderFailure),
+            "{}: {:?}",
+            v.case_id,
+            v.notes
+        );
+        assert!(!v.pass_, "an errored case can never pass");
+    }
+    let s = summarize(&vs);
+    assert_eq!(s.errored, vs.len());
+    assert_eq!(s.non_converged, 0);
+    // Denominator preserved: errored cases still count as failures.
+    assert!((s.pass_rate - 0.0).abs() < f64::EPSILON);
+}
+
+#[tokio::test]
+async fn turn_budget_exhaustion_is_non_convergence_not_harness_error() {
+    let _lock = EVAL_RUN_LOCK.lock().unwrap();
+    // max_turns=1: every script's first turn is a tool call, so every case
+    // exhausts the budget without a terminal response.
+    let (runner, _mock) = Runner::new_mock(1, false);
+    let vs = runner
+        .run_all(&shared_cases_dir(), |_| ())
+        .await
+        .expect("run_all");
+    assert!(!vs.is_empty());
+    for v in &vs {
+        assert_eq!(
+            v.error_kind,
+            Some(CaseError::TurnBudgetExhausted),
+            "{}: {:?}",
+            v.case_id,
+            v.notes
+        );
+        assert!(!v.pass_);
+    }
+    let s = summarize(&vs);
+    assert_eq!(s.non_converged, s.total);
+    assert_eq!(
+        s.errored, 0,
+        "non-convergence is model behavior, not harness"
+    );
+}
+
+#[tokio::test]
+async fn trace_jsonl_records_run_lifecycle() {
+    let _lock = EVAL_RUN_LOCK.lock().unwrap();
+    let dir = std::env::temp_dir().join(format!("piforge-trace-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let (runner, _mock) = Runner::new_mock(12, false);
+    let runner = runner.with_trace_dir(dir.clone());
+    let vs = runner
+        .run_all(&shared_cases_dir(), |_| ())
+        .await
+        .expect("run_all");
+    assert!(runner.degraded_traces().is_empty());
+    assert!(vs.iter().all(|v| v.pass_));
+
+    let files: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(files.len(), vs.len(), "one trace file per case");
+    for entry in files {
+        let text = std::fs::read_to_string(entry.path()).unwrap();
+        let mut saw_start = false;
+        let mut saw_call = false;
+        let mut saw_result = false;
+        let mut terminal = None;
+        for line in text.lines() {
+            let v: serde_json::Value = serde_json::from_str(line)
+                .unwrap_or_else(|e| panic!("{}: bad JSONL ({e}): {line}", entry.path().display()));
+            assert!(v.get("case_id").is_some(), "case id stamped: {line}");
+            let lower = line.to_lowercase();
+            assert!(!lower.contains("api_key"), "no key material: {line}");
+            match v["event"].as_str().unwrap() {
+                "run_started" => {
+                    saw_start = true;
+                    let h = v["prefix_sha256"].as_str().unwrap();
+                    assert_eq!(h.len(), 64, "sha256 hex: {h}");
+                    assert!(h.chars().all(|c| c.is_ascii_hexdigit()));
+                }
+                "tool_called" => saw_call = true,
+                "tool_result" => saw_result = true,
+                "run_finished" | "run_error" => {
+                    terminal = Some(v["event"].as_str().unwrap().to_string())
+                }
+                _ => {}
+            }
+        }
+        assert!(saw_start, "{}: RunStarted present", entry.path().display());
+        assert!(
+            saw_call && saw_result,
+            "{}: tool lifecycle recorded",
+            entry.path().display()
+        );
+        assert_eq!(
+            terminal.as_deref(),
+            Some("run_finished"),
+            "{}: terminal event",
+            entry.path().display()
+        );
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn trace_sink_is_behavior_neutral() {
+    let _lock = EVAL_RUN_LOCK.lock().unwrap();
+    let (plain, _m1) = Runner::new_mock(12, false);
+    let v_plain = plain
+        .run_all(&shared_cases_dir(), |_| ())
+        .await
+        .expect("run_all");
+
+    let dir = std::env::temp_dir().join(format!("piforge-trace-neutral-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let (traced, _m2) = Runner::new_mock(12, false);
+    let v_traced = traced
+        .with_trace_dir(dir.clone())
+        .run_all(&shared_cases_dir(), |_| ())
+        .await
+        .expect("run_all");
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert_eq!(v_plain.len(), v_traced.len());
+    for (a, b) in v_plain.iter().zip(v_traced.iter()) {
+        assert_eq!(a.case_id, b.case_id);
+        assert_eq!(a.turns, b.turns, "{}", a.case_id);
+        assert_eq!(a.pass_, b.pass_, "{}", a.case_id);
+        assert_eq!(a.cache_hit_rate, b.cache_hit_rate, "{}", a.case_id);
+    }
 }

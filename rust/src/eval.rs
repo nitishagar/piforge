@@ -4,12 +4,13 @@
 //! and a mock provider lets it all run in CI without a llama-server.
 //!
 //! Decision rule: ≥55% fix-rate AND <10% register/pin hallucination → BUILD_LOCAL.
+use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::agent::{Agent, LlmClient, MockProvider, MockTurn};
+use crate::agent::{Agent, LlmClient, MockProvider, MockTurn, RunError, TraceEvent};
 use crate::broker::{Broker, ThrottledReader};
 use crate::hil::ToolVec;
 use crate::provider::ToolCall;
@@ -42,6 +43,24 @@ pub struct Gold {
     pub is_hardware_fault: bool,
 }
 
+/// Why a case errored — the attribution split. A turn-budget exhaustion is
+/// model non-convergence, NOT a harness error: it counts in `non_converged`,
+/// while the other kinds count in `errored` (and everything still fails the
+/// case, preserving the `pass_rate` denominator).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaseError {
+    ProviderFailure,
+    WorkspaceError,
+    Interrupted,
+    TurnBudgetExhausted,
+}
+
+impl CaseError {
+    pub fn is_harness_error(&self) -> bool {
+        !matches!(self, CaseError::TurnBudgetExhausted)
+    }
+}
+
 /// Per-case verdict.
 #[derive(Debug, Clone, Default)]
 pub struct Verdict {
@@ -49,6 +68,7 @@ pub struct Verdict {
     pub pass_: bool,
     pub partial: bool,
     pub hallucination: bool,
+    pub error_kind: Option<CaseError>,
     pub duration_sec: f64,
     pub turns: u32,
     pub cache_hit_rate: f64,
@@ -62,6 +82,10 @@ pub struct Runner {
     mock: Option<std::sync::Arc<MockProvider>>,
     max_turns: u32,
     preload: bool,
+    trace_dir: Option<PathBuf>,
+    /// Cases whose trace degraded (write failure) — reported at end of run,
+    /// never a run failure.
+    degraded: std::sync::Arc<parking_lot::Mutex<Vec<String>>>,
 }
 
 impl Runner {
@@ -71,6 +95,8 @@ impl Runner {
             mock: None,
             max_turns,
             preload,
+            trace_dir: None,
+            degraded: std::sync::Arc::new(parking_lot::Mutex::new(Vec::new())),
         }
     }
     pub fn new_mock(max_turns: u32, preload: bool) -> (Self, std::sync::Arc<MockProvider>) {
@@ -81,9 +107,23 @@ impl Runner {
                 mock: Some(mock.clone()),
                 max_turns,
                 preload,
+                trace_dir: None,
+                degraded: std::sync::Arc::new(parking_lot::Mutex::new(Vec::new())),
             },
             mock,
         )
+    }
+
+    /// Write one JSONL trace per case under `dir/<case-id>.jsonl` (the binary
+    /// creates a per-run subdirectory). Traces are local run artifacts.
+    pub fn with_trace_dir(mut self, dir: PathBuf) -> Self {
+        self.trace_dir = Some(dir);
+        self
+    }
+
+    /// Case ids whose trace degraded during the run (write failures).
+    pub fn degraded_traces(&self) -> Vec<String> {
+        self.degraded.lock().clone()
     }
 
     /// Run all *.json cases in `cases_dir`, invoking `progress` per verdict.
@@ -125,6 +165,7 @@ impl Runner {
         let workspace = match temp_workspace(&c.id, &c.setup.files) {
             Ok(w) => w,
             Err(e) => {
+                v.error_kind = Some(CaseError::WorkspaceError);
                 v.notes = format!("error: {e}");
                 return v;
             }
@@ -151,20 +192,60 @@ impl Runner {
             edit_tool.clone(),
         ];
 
+        // Per-case trace sink: one JSONL file, stamped with the case id on
+        // every line. Write failures degrade the trace (flagged at end of
+        // run) and never fail the case — the trace must not change behavior.
+        let trace_sink: Option<crate::agent::TraceSink> =
+            self.trace_dir
+                .as_ref()
+                .map(|dir| -> crate::agent::TraceSink {
+                    let path = dir.join(format!("{}.jsonl", sanitize_case_id(&c.id)));
+                    let file = match std::fs::File::create(&path) {
+                        Ok(f) => f,
+                        Err(_) => {
+                            self.degraded.lock().push(c.id.clone());
+                            return std::sync::Arc::new(|_: &TraceEvent| {});
+                        }
+                    };
+                    let writer = std::sync::Arc::new(parking_lot::Mutex::new(Some(file)));
+                    let degraded = self.degraded.clone();
+                    let case_id = c.id.clone();
+                    std::sync::Arc::new(move |ev: &TraceEvent| {
+                        let mut guard = writer.lock();
+                        let Some(file) = guard.as_mut() else { return };
+                        let mut line = match serde_json::to_value(ev) {
+                            Ok(v) => v,
+                            Err(_) => return,
+                        };
+                        line["case_id"] = serde_json::json!(case_id);
+                        if writeln!(file, "{line}").is_err() {
+                            *guard = None;
+                            drop(guard);
+                            degraded.lock().push(case_id.clone());
+                        }
+                    })
+                });
+
         let res = match &self.client {
             Some(client) => {
-                let agent = Agent::new(client.clone(), tools, self.max_turns, self.preload);
+                let mut agent = Agent::new(client.clone(), tools, self.max_turns, self.preload);
+                if let Some(sink) = &trace_sink {
+                    agent = agent.with_trace(sink.clone());
+                }
                 agent.run(&c.symptom, |_| ()).await
             }
             None => {
                 let mock = self.mock.clone().unwrap();
                 mock.load(script(&c.id)).await;
-                let agent = Agent::new(
+                let mut agent = Agent::new(
                     mock as std::sync::Arc<dyn LlmClient>,
                     tools,
                     self.max_turns,
                     self.preload,
                 );
+                if let Some(sink) = &trace_sink {
+                    agent = agent.with_trace(sink.clone());
+                }
                 agent.run(&c.symptom, |_| ()).await
             }
         };
@@ -177,6 +258,11 @@ impl Runner {
                 edit_tool.edits(),
             ),
             Err(e) => {
+                v.error_kind = Some(match &e {
+                    RunError::TurnBudget => CaseError::TurnBudgetExhausted,
+                    RunError::Interrupted => CaseError::Interrupted,
+                    RunError::Provider(_) => CaseError::ProviderFailure,
+                });
                 v.notes = format!("error: {e}");
                 return v;
             }
@@ -221,6 +307,11 @@ impl Runner {
 pub struct Summary {
     pub total: usize,
     pub passed: usize,
+    /// Harness errors (provider/workspace/interrupt) — distinct from model
+    /// failures; a verdict is not recordable with errored > 0.
+    pub errored: usize,
+    /// Turn-budget non-convergence — model behavior, not a harness error.
+    pub non_converged: usize,
     pub partial: usize,
     pub hallucinated: usize,
     pub pass_rate: f64,
@@ -237,6 +328,14 @@ pub fn summarize(vs: &[Verdict]) -> Summary {
     let passed = vs.iter().filter(|v| v.pass_).count();
     let partial = vs.iter().filter(|v| v.partial).count();
     let hallucinated = vs.iter().filter(|v| v.hallucination).count();
+    let errored = vs
+        .iter()
+        .filter(|v| v.error_kind.map(|k| k.is_harness_error()).unwrap_or(false))
+        .count();
+    let non_converged = vs
+        .iter()
+        .filter(|v| v.error_kind == Some(CaseError::TurnBudgetExhausted))
+        .count();
     let cache_sum: f64 = vs.iter().map(|v| v.cache_hit_rate).sum();
     let mut turns: Vec<u32> = vs.iter().map(|v| v.turns).collect();
     turns.sort_unstable();
@@ -244,6 +343,8 @@ pub fn summarize(vs: &[Verdict]) -> Summary {
     Summary {
         total,
         passed,
+        errored,
+        non_converged,
         partial,
         hallucinated,
         pass_rate: passed as f64 / total as f64,

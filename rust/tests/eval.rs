@@ -48,8 +48,8 @@ fn decide_gate_thresholds() {
     }
 }
 
-// The word-boundary matching lives as a private fn in eval.rs; we exercise it
-// indirectly via the public summarize/decide surface.
+// The word-boundary matcher is pinned directly by the diagnosis_matching
+// unit tests inside src/eval.rs.
 
 #[test]
 fn summarize_aggregates() {
@@ -620,5 +620,35 @@ fn mock_exit_contract_fails_on_failing_case() {
         .expect("run piforge-eval --mock (healthy)");
     assert!(out.status.success());
     assert!(String::from_utf8_lossy(&out.stdout).contains("DECISION: BUILD_LOCAL"));
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+// Binary-level: the decision-only leg of the exit contract — every case
+// passes but the hallucination budget blows the decision away from
+// BUILD_LOCAL, so --mock must still exit non-zero.
+#[test]
+fn mock_exit_contract_fails_on_non_build_decision() {
+    use std::process::Command;
+    let root = temp_root("contract-decision");
+    for id in ["i2c-bus-scan-all-addresses", "undervoltage-brownout"] {
+        write_case_variant(&root, id, |v| {
+            v["hallucinated"] = serde_json::json!(["STOP"]);
+        });
+    }
+    let out = Command::new(env!("CARGO_BIN_EXE_piforge-eval"))
+        .args(["--mock", "--config", "none", "--cases"])
+        .arg(&root)
+        .output()
+        .expect("run piforge-eval --mock (non-build decision)");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("DECISION: INCONCLUSIVE"),
+        "2/2 pass with 100% halluc should be INCONCLUSIVE, got {stdout}"
+    );
+    assert!(
+        !out.status.success(),
+        "a non-BUILD mock decision must exit non-zero"
+    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains("mock parity violated"));
     let _ = std::fs::remove_dir_all(&root);
 }

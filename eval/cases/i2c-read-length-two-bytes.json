@@ -1,0 +1,21 @@
+{
+  "id": "i2c-read-length-two-bytes",
+  "archetype": "i2c-protocol",
+  "symptom": "current readings flicker between plausible and absurd — the high byte seems to arrive alone.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": { "64": "INA219" },
+    "i2c_registers": { "64": { "2": [18, 52] } },
+    "files": {
+      "power.py": "import smbus\nbus = smbus.SMBus(1)\nval = bus.read_byte_data(0x40, 2)\nprint(val)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "The current register is 16-bit; a single-byte read returns half the word. Read both bytes (read_word_data / length 2).",
+    "fix_applies": "power.py",
+    "fix_must_contain": ["read_word_data"],
+    "fix_must_not_have": ["read_byte_data"]
+  },
+  "hallucinated": ["0x76", "0x77"]
+}

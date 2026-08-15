@@ -33,6 +33,9 @@ async-trait = "0.1"
 # Mutex without poisoning — a panicked tool thread must not cascade-kill the
 # whole agent loop (std Mutex poisons on panic; parking_lot does not).
 parking_lot = "0.12"
+# Prefix hash for run traces (the frozen prompt is recorded as a hash, never
+# a body).
+sha2 = "0.10"
 # GPIO character device (pure Rust, no libgpiod C dep). Linux-only; guarded.
 gpiod = { version = "0.3", optional = true }
 # Raw-fd scope path: open /dev/gpiochipN directly, GPIO_V2 ioctls +

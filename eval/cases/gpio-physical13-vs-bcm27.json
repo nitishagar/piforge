@@ -1,0 +1,20 @@
+{
+  "id": "gpio-physical13-vs-bcm27",
+  "archetype": "gpio-numbering",
+  "symptom": "the datasheet says my sensor INT pin is on physical pin 13 of the header, and my script uses 13, but nothing responds.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "gpio_pins": { "27": "sensor INT" },
+    "files": {
+      "sense.py": "from gpiozero import Button\nirq = Button(13)\nirq.wait_for_press()\nprint(\"interrupt\")\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "Physical header pin 13 is BCM 27. gpiozero takes BCM numbers: Button(27).",
+    "fix_applies": "sense.py",
+    "fix_must_contain": ["Button(27)"],
+    "fix_must_not_have": ["Button(13)"]
+  },
+  "hallucinated": ["BCM 13"]
+}

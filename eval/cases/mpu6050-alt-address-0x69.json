@@ -1,0 +1,21 @@
+{
+  "id": "mpu6050-alt-address-0x69",
+  "archetype": "wrong-i2c-address",
+  "symptom": "my IMU stops answering after I soldered the AD0 jumper. The old address in the driver times out now.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": { "105": "MPU6050" },
+    "i2c_registers": { "105": { "117": [104] } },
+    "files": {
+      "imu.py": "from mpu6050 import MPU6050\nsensor = MPU6050(0x68)\nprint(sensor.get_accel_data())\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "AD0 high moves the device to 0x69. WHO_AM_I (0x75) confirms 0x68 silicon at the new address. Use address=0x69.",
+    "fix_applies": "imu.py",
+    "fix_must_contain": ["0x69"],
+    "fix_must_not_have": ["MPU6050(0x68)"]
+  },
+  "hallucinated": ["0x76", "0x77"]
+}

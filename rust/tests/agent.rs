@@ -1,4 +1,8 @@
 //! I21 telemetry preload + I22 chat interrupt.
+// The process-wide lock below deliberately spans awaits: it serializes these
+// tests against the SIGINT test so a stray signal can't fail a neighbor.
+#![allow(clippy::await_holding_lock)]
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 

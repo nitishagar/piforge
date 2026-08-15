@@ -1,0 +1,21 @@
+{
+  "id": "gpio-pin-shorted-to-ground",
+  "archetype": "stop-short",
+  "symptom": "the output pin reads back 0 no matter what the code writes, the wire gets warm, and dmesg reports the line stuck.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "gpio_pins": { "17": "output (stuck low)" },
+    "dmesg_tail": [
+      "gpiochip4: line 17 stuck low, cannot drive"
+    ],
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "The line is stuck low and the wire is warm — the output is shorted to ground. This is a physical wiring fault: STOP coding, disconnect before the pin driver is damaged; fix the short, then retry.",
+    "fix_applies": "",
+    "fix_must_contain": [],
+    "fix_must_not_have": [],
+    "is_hardware_fault": true
+  },
+  "hallucinated": ["dtparam", "driver", "0x76"]
+}

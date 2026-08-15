@@ -31,7 +31,11 @@ fn load_cases() -> Vec<(PathBuf, Case)> {
 #[test]
 fn every_case_is_hw_fault_or_scorable_file_fix() {
     let cases = load_cases();
-    assert_eq!(cases.len(), 13, "expected the 13 eval fixtures");
+    assert!(
+        cases.len() >= 40,
+        "the gate corpus is at least 40 fixtures (coverage floor), got {}",
+        cases.len()
+    );
     for (path, c) in &cases {
         let stem = path.file_stem().and_then(|s| s.to_str());
         assert_eq!(
@@ -63,6 +67,37 @@ fn every_case_is_hw_fault_or_scorable_file_fix() {
                 "{}: setup.files must contain gold.fix_applies {:?}",
                 path.display(),
                 c.gold.fix_applies
+            );
+        }
+    }
+}
+
+#[test]
+fn every_setup_uses_only_sim_consumed_semantics() {
+    // Fidelity: mock parity proves script↔gold consistency, NOT that the sim
+    // actually serves the fixture's evidence. Pin the known sim bounds so a
+    // fixture cannot silently depend on unmodeled state (sim.rs consumes:
+    // board, i2c_devices, i2c_registers, scan_pattern (only "" | "all"),
+    // gpio_pins (labels only — modes are ignored), files, dmesg_tail,
+    // throttled, one_wire, iio, i2c_bus_present).
+    let cases = load_cases();
+    for (path, c) in &cases {
+        assert!(
+            c.setup.scan_pattern.is_empty() || c.setup.scan_pattern == "all",
+            "{}: scan_pattern {:?} is not sim-consumed (only \"\" | \"all\")",
+            path.display(),
+            c.setup.scan_pattern
+        );
+        // A diagnosis that leans on power state must carry telemetry the sim
+        // actually decodes (throttled), not just dmesg prose.
+        let symptom_mentions_power = c.symptom.to_lowercase().contains("volt")
+            || c.symptom.to_lowercase().contains("power")
+            || c.symptom.to_lowercase().contains("usb");
+        if symptom_mentions_power {
+            assert!(
+                !c.setup.throttled.is_empty(),
+                "{}: symptom references power/voltage — setup.throttled must be explicit",
+                path.display()
             );
         }
     }

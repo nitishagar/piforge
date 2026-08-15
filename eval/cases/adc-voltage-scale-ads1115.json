@@ -1,0 +1,20 @@
+{
+  "id": "adc-voltage-scale-ads1115",
+  "archetype": "adc-scale",
+  "symptom": "my ADC prints numbers around 16000 but the battery divider should read ~2.05 V. I think the raw counts are being shown instead of volts.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "iio": [ { "name": "ads1115", "raw": 16384, "scale": 0.000125 } ],
+    "files": {
+      "adc.py": "raw = int(open(\"/sys/bus/iio/devices/iio:device0/in_voltage0_raw\").read())\nprint(raw)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "The IIO channel reports raw counts; in_voltage_scale (0.000125 V/bit for the ±4.096 V range) must be multiplied in.",
+    "fix_applies": "adc.py",
+    "fix_must_contain": ["raw * scale"],
+    "fix_must_not_have": []
+  },
+  "hallucinated": []
+}

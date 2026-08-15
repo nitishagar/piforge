@@ -21,6 +21,10 @@ struct Args {
     /// Use scripted mock provider (CI; no llama-server).
     #[arg(long)]
     mock: bool,
+    /// Write one JSONL trace per case under DIR/<run-id>/. Local run artifact;
+    /// the trace records the run lifecycle (turns, tool calls, results, errors).
+    #[arg(long)]
+    trace_dir: Option<std::path::PathBuf>,
 }
 
 #[tokio::main]
@@ -31,7 +35,7 @@ async fn main() -> Result<()> {
         cfg.eval.cases_dir = c;
     }
 
-    let runner = if args.mock {
+    let mut runner = if args.mock {
         eprintln!("piforge-eval: MOCK mode (scripted provider, no model)");
         let (r, _mock) = Runner::new_mock(cfg.agent.max_turns, cfg.agent.telemetry_preload);
         r
@@ -44,6 +48,17 @@ async fn main() -> Result<()> {
             cfg.agent.telemetry_preload,
         )
     };
+    if let Some(dir) = &args.trace_dir {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let run_id = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let run_dir = dir.join(format!("run-{run_id}"));
+        std::fs::create_dir_all(&run_dir)?;
+        eprintln!("piforge-eval: tracing to {}", run_dir.display());
+        runner = runner.with_trace_dir(run_dir);
+    }
 
     eprintln!("piforge-eval: running cases from {}", cfg.eval.cases_dir);
     let verdicts = runner
@@ -59,11 +74,10 @@ async fn main() -> Result<()> {
         .await?;
 
     if verdicts.is_empty() {
-        eprintln!(
+        anyhow::bail!(
             "no cases found — add fixtures under {}/*.json",
             cfg.eval.cases_dir
         );
-        return Ok(());
     }
 
     let s = summarize(&verdicts);
@@ -74,8 +88,8 @@ async fn main() -> Result<()> {
     );
     println!("\n=== Summary ===");
     println!(
-        "cases={} passed={} partial={} hallucinated={}",
-        s.total, s.passed, s.partial, s.hallucinated
+        "cases={} passed={} errored={} non_converged={} partial={} hallucinated={}",
+        s.total, s.passed, s.errored, s.non_converged, s.partial, s.hallucinated
     );
     println!(
         "pass_rate={:.0}% halluc_rate={:.0}% median_turns={} mean_cache_hit={:.0}%",
@@ -90,5 +104,15 @@ async fn main() -> Result<()> {
         cfg.eval.hallucination_threshold * 100.0
     );
     println!("DECISION: {decision}");
+    for case in runner.degraded_traces() {
+        eprintln!("trace degraded for {case} (write failure; run unaffected)");
+    }
+    if args.mock {
+        // Mock scripts hit gold by construction: any failure or a non-BUILD
+        // decision is a harness regression and must fail CI (exit contract).
+        if verdicts.iter().any(|v| !v.pass_) || decision != "BUILD_LOCAL" {
+            anyhow::bail!("mock parity violated: every case must pass and decide BUILD_LOCAL");
+        }
+    }
     Ok(())
 }

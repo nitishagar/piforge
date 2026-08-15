@@ -2,7 +2,7 @@
 //! The key regression: a symlink under the
 //! workspace that points outside must NOT let edits escape.
 use piforge::hil::Tool; // bring execute() into scope
-use piforge::sim::{CodeEditTool, Setup};
+use piforge::sim::CodeEditTool;
 use serde_json::json;
 use std::path::PathBuf;
 

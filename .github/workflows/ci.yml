@@ -24,7 +24,6 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
-        continue-on-error: true # warnings-as-errors can wait; surface for now
       - name: Test
         run: cargo test --lib --tests
       - name: Test (hw feature, pure-logic + ABI)
@@ -37,9 +36,9 @@ jobs:
         run: cargo build --release --bin piforge-eval
       - name: Mock eval parity check
         run: |
+          set -o pipefail
           ./target/release/piforge-eval --mock --config ../piforge.toml.example --cases ../eval/cases | tee /tmp/out.txt
           grep -q "DECISION: BUILD_LOCAL" /tmp/out.txt
-          grep -q "passed=13" /tmp/out.txt
 
   # Cross-compile the real hw binary to the Pi 5 target.
   cross-compile-arm64:
@@ -61,3 +60,10 @@ jobs:
         run: cargo build --release --features hw --target aarch64-unknown-linux-gnu --bin piforge
       - name: Verify ELF
         run: file target/aarch64-unknown-linux-gnu/release/piforge
+      - name: Upload arm64 hw binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: piforge-arm64
+          path: rust/target/aarch64-unknown-linux-gnu/release/piforge
+          if-no-files-found: error
+          retention-days: 7

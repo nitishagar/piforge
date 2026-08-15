@@ -4,12 +4,13 @@
 //! tool schemas are a byte-stable prefix; message history is append-only.
 use std::sync::Arc;
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use async_trait::async_trait;
+use serde::Serialize;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
-use crate::hil::{Tool, ToolVec};
+use crate::hil::{ToolResult, ToolVec};
 use crate::provider::{ChatMessage, ChatRequest, ChatResponse, Client, Tool as ProvTool, ToolCall};
 
 /// Minimal interface the agent loop needs from a model provider. Satisfied by
@@ -71,12 +72,94 @@ impl RunResult {
     }
 }
 
+/// Typed run failures — the eval attributes per-case errors from these
+/// variants; no message-string matching anywhere. `Display` keeps the exact
+/// legacy texts so operator greps and existing tests survive the typing.
+#[derive(Debug)]
+pub enum RunError {
+    TurnBudget,
+    Interrupted,
+    Provider(String),
+}
+
+impl std::fmt::Display for RunError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RunError::TurnBudget => {
+                write!(f, "turn budget exhausted without a terminal response")
+            }
+            RunError::Interrupted => write!(f, "interrupted"),
+            RunError::Provider(e) => write!(f, "{e}"),
+        }
+    }
+}
+
+impl std::error::Error for RunError {}
+
+/// Append-only trace event (one JSONL line per event). The frozen prompt is
+/// recorded as a hash, never a body; the sink owner stamps case identity.
+/// Traces contain tool output (sensor reads, file contents, dmesg) — local
+/// run artifacts only: never share or commit them.
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "event", rename_all = "snake_case")]
+pub enum TraceEvent {
+    RunStarted {
+        prefix_sha256: String,
+    },
+    AssistantText {
+        text: String,
+    },
+    ToolCalled {
+        name: String,
+        arguments: String,
+    },
+    ToolResult {
+        tool: String,
+        ok: bool,
+        summary: String,
+    },
+    TurnUsage {
+        prompt_tokens: u64,
+        completion: u64,
+        cached: u64,
+    },
+    RunError {
+        message: String,
+    },
+    RunFinished {
+        turns: u32,
+        final_text: String,
+    },
+}
+
+/// SHA-256 of the frozen prefix, emitted at run start.
+fn prefix_hash() -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(SYSTEM_PROMPT);
+    format!("{:x}", h.finalize())
+}
+
+fn truncate(s: &str, n: usize) -> String {
+    if s.chars().count() <= n {
+        s.into()
+    } else {
+        let mut t: String = s.chars().take(n).collect();
+        t.push_str("...");
+        t
+    }
+}
+
+/// Passive trace sink — invoked synchronously at each emission point.
+pub type TraceSink = Arc<dyn Fn(&TraceEvent) + Send + Sync>;
+
 /// The agent loop driver. Tools are owned Arc<dyn Tool> so they can be shared.
 pub struct Agent {
     client: Arc<dyn LlmClient>,
     tools: ToolVec,
     max_turns: u32,
     preload: bool,
+    trace: Option<TraceSink>,
 }
 
 impl Agent {
@@ -86,12 +169,27 @@ impl Agent {
             tools,
             max_turns: if max_turns == 0 { 12 } else { max_turns },
             preload,
+            trace: None,
+        }
+    }
+
+    /// Opt in to an append-only trace. The sink is invoked synchronously at
+    /// each emission point; it must not feed back into the loop — enabling a
+    /// trace never changes run behavior or metrics.
+    pub fn with_trace(mut self, sink: TraceSink) -> Self {
+        self.trace = Some(sink);
+        self
+    }
+
+    fn emit(&self, event: TraceEvent) {
+        if let Some(sink) = &self.trace {
+            sink(&event);
         }
     }
 
     /// Run one task. `user_msg` is the user's symptom. `on_text` (optional)
     /// receives assistant text as it finalizes per turn.
-    pub async fn run<F>(&self, user_msg: &str, mut on_text: F) -> Result<RunResult>
+    pub async fn run<F>(&self, user_msg: &str, mut on_text: F) -> Result<RunResult, RunError>
     where
         F: FnMut(&str),
     {
@@ -126,6 +224,10 @@ impl Agent {
         }
         let tool_defs: Vec<ProvTool> = self.tools.iter().map(|t| t.schema()).collect();
 
+        self.emit(TraceEvent::RunStarted {
+            prefix_sha256: prefix_hash(),
+        });
+
         let mut acc_prompt = 0u64;
         let mut acc_completion = 0u64;
         let mut acc_cached = 0u64;
@@ -139,20 +241,40 @@ impl Agent {
             };
             let resp: ChatResponse = tokio::select! {
                 _ = tokio::signal::ctrl_c() => {
-                    return Err(anyhow!("interrupted"));
+                    self.emit(TraceEvent::RunError { message: "interrupted".into() });
+                    return Err(RunError::Interrupted);
                 }
                 resp = self.client.chat(&req) => {
-                    resp.map_err(|e| anyhow!("turn {turn}: {e}"))?
+                    match resp {
+                        Ok(r) => r,
+                        Err(e) => {
+                            let msg = format!("turn {turn}: {e}");
+                            self.emit(TraceEvent::RunError { message: msg.clone() });
+                            return Err(RunError::Provider(msg));
+                        }
+                    }
                 }
             };
             acc_prompt += resp.prompt_tokens;
             acc_completion += resp.completion;
             acc_cached += resp.cached;
+            self.emit(TraceEvent::TurnUsage {
+                prompt_tokens: resp.prompt_tokens,
+                completion: resp.completion,
+                cached: resp.cached,
+            });
 
             if resp.tool_calls.is_empty() {
                 if !resp.content.is_empty() {
+                    self.emit(TraceEvent::AssistantText {
+                        text: resp.content.clone(),
+                    });
                     on_text(&resp.content);
                 }
+                self.emit(TraceEvent::RunFinished {
+                    turns: turn + 1,
+                    final_text: resp.content.clone(),
+                });
                 return Ok(RunResult {
                     final_text: resp.content,
                     turns: turn + 1,
@@ -163,6 +285,9 @@ impl Agent {
             }
 
             if !resp.content.is_empty() {
+                self.emit(TraceEvent::AssistantText {
+                    text: resp.content.clone(),
+                });
                 on_text(&resp.content);
                 on_text("\n");
             }
@@ -181,37 +306,48 @@ impl Agent {
 
             // Dispatch each tool call + append its result.
             for call in &resp.tool_calls {
+                self.emit(TraceEvent::ToolCalled {
+                    name: call.function.name.clone(),
+                    arguments: call.function.arguments.clone(),
+                });
                 let out = self.dispatch(call).await;
+                self.emit(TraceEvent::ToolResult {
+                    tool: out.tool.clone(),
+                    ok: out.ok,
+                    summary: truncate(&out.to_json_string(), 400),
+                });
                 msgs.push(ChatMessage {
                     role: "tool".into(),
-                    content: Some(out),
+                    content: Some(out.to_json_string()),
                     tool_calls: None,
                     tool_call_id: Some(call.id.clone()),
                 });
             }
         }
-        Err(anyhow!("turn budget exhausted without a terminal response"))
+        let err = RunError::TurnBudget;
+        self.emit(TraceEvent::RunError {
+            message: err.to_string(),
+        });
+        Err(err)
     }
 
-    async fn dispatch(&self, call: &ToolCall) -> String {
+    async fn dispatch(&self, call: &ToolCall) -> ToolResult {
         let args: Value = serde_json::from_str(&call.function.arguments).unwrap_or(Value::Null);
         for t in &self.tools {
             if t.name() == call.function.name {
-                let res = t.execute(&args).await;
-                return res.to_json_string();
+                return t.execute(&args).await;
             }
         }
-        format!(
-            "{{\"tool\":\"{}\",\"ok\":false,\"error\":\"unknown tool\"}}",
-            call.function.name
-        )
+        ToolResult::err(call.function.name.as_str(), "unknown tool")
     }
 }
 
 /// A mutex-guarded mock LLM client for the eval harness.
+#[derive(Default)]
 pub struct MockProvider {
     inner: Mutex<MockInner>,
 }
+#[derive(Default)]
 struct MockInner {
     turns: Vec<MockTurn>,
     pos: usize,

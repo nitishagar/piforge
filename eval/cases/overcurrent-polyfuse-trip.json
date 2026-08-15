@@ -1,0 +1,22 @@
+{
+  "id": "overcurrent-polyfuse-trip",
+  "archetype": "stop-overcurrent",
+  "symptom": "the USB sensor hub dies a few seconds after the actuator board powers up and comes back only after minutes unplugged.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": {},
+    "dmesg_tail": [
+      "usb 1-1.2: over-current change #1",
+      "usb 1-1.2: disconnected"
+    ],
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "dmesg shows an over-current trip on the USB port — the actuator inrush is tripping the polyfuse. This is a power/wiring fault: STOP coding; power the actuator from its own supply, not the Pi's USB rail.",
+    "fix_applies": "",
+    "fix_must_contain": [],
+    "fix_must_not_have": [],
+    "is_hardware_fault": true
+  },
+  "hallucinated": ["0x76", "driver", "dtparam"]
+}

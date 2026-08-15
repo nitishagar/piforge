@@ -1,0 +1,20 @@
+{
+  "id": "pi5-gpio-character-device",
+  "archetype": "pi5-migration",
+  "symptom": "the legacy sysfs export script silently writes nothing on the new board; /sys/class/gpio stays empty.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "gpio_pins": { "17": "output" },
+    "files": {
+      "gpio_old.py": "open(\"/sys/class/gpio/export\", \"w\").write(\"17\")\nopen(\"/sys/class/gpio/gpio17/value\", \"w\").write(\"1\")\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "The legacy sysfs GPIO interface is gone on the Pi 5; use the character device (libgpiod / gpiozero) instead.",
+    "fix_applies": "gpio_old.py",
+    "fix_must_contain": ["gpiod"],
+    "fix_must_not_have": ["/sys/class/gpio"]
+  },
+  "hallucinated": ["sysfs works on the Pi 5"]
+}

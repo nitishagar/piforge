@@ -30,8 +30,6 @@ fn auto_cfg() -> SafetyConfig {
     SafetyConfig {
         arm_mode: "auto".into(),
         stop_on_under_voltage: true,
-        per_pin_max_current_ma: 12,
-        rail_budget_ma: 50,
     }
 }
 
@@ -73,10 +71,27 @@ fn confirm_deny_blocks() {
     let cfg = SafetyConfig {
         arm_mode: "confirm".into(),
         stop_on_under_voltage: true,
-        ..Default::default()
     };
     let g = Broker::new(cfg, Some(stub(true, false, false)), Arc::new(|_| false));
     assert!(g.allow("gpio_set", json!({"pin":17,"value":1})).is_err());
+}
+
+#[test]
+fn confirm_deny_names_op_and_risk() {
+    // The refusal must name the op + risk tier so an operator sees what was
+    // refused (and the CLI deny path has a deterministic string to pin).
+    let cfg = SafetyConfig {
+        arm_mode: "confirm".into(),
+        stop_on_under_voltage: true,
+    };
+    let g = Broker::new(cfg, Some(stub(true, false, false)), Arc::new(|_| false));
+    let err = g
+        .allow("gpio_set", json!({"pin":17,"value":1}))
+        .unwrap_err();
+    assert!(
+        err.contains("DENIED by user (op=gpio_set risk=I/level1)"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -84,7 +99,6 @@ fn scoped_arm_re_approves_same_pin_within_window() {
     let cfg = SafetyConfig {
         arm_mode: "confirm".into(),
         stop_on_under_voltage: true,
-        ..Default::default()
     };
     let counter = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let c2 = counter.clone();
@@ -156,4 +170,33 @@ fn stdin_confirmer_denies_non_tty_without_read() {
     );
     let f = Broker::stdin_confirmer();
     assert!(!f("approve?"));
+}
+
+#[test]
+fn under_voltage_blocks_before_confirm_in_confirm_mode() {
+    // EG1 in the confirm arm too: an over-permissive human (always-yes
+    // confirmer) must STILL be refused when UV is active, without prompting.
+    let cfg = SafetyConfig {
+        arm_mode: "confirm".into(),
+        stop_on_under_voltage: true,
+    };
+    let asked = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let a2 = asked.clone();
+    let g = Broker::new(
+        cfg,
+        Some(stub(true, true, false)),
+        Arc::new(move |_| {
+            a2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            true
+        }),
+    );
+    let err = g
+        .allow("gpio_set", json!({"pin":17,"value":1}))
+        .unwrap_err();
+    assert!(err.contains("under-voltage"), "{err}");
+    assert_eq!(
+        asked.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "UV check must precede the confirm prompt"
+    );
 }

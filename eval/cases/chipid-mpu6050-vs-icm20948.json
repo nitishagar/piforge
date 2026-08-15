@@ -1,0 +1,21 @@
+{
+  "id": "chipid-mpu6050-vs-icm20948",
+  "archetype": "chipid-confusion",
+  "symptom": "accelerometer readings are all zero. I ordered the 9-axis breakout but reused my old 6-axis driver code.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": { "105": "ICM-20948" },
+    "i2c_registers": { "105": { "0": [233] } },
+    "files": {
+      "imu.py": "from mpu6050 import MPU6050\nsensor = MPU6050(0x69)\nprint(sensor.get_accel_data())\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "WHO_AM_I reads 0xE9 — an ICM-20948, not an MPU6050. Use the ICM20948 driver library.",
+    "fix_applies": "imu.py",
+    "fix_must_contain": ["ICM20948"],
+    "fix_must_not_have": ["mpu6050"]
+  },
+  "hallucinated": ["0x68", "0x70"]
+}

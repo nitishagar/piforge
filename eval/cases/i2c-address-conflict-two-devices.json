@@ -1,0 +1,22 @@
+{
+  "id": "i2c-address-conflict-two-devices",
+  "archetype": "stop-i2c-conflict",
+  "symptom": "after adding a second pressure board the readings from both became garbage — swapped halves and CRC errors. Each board worked alone before.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "i2c_devices": { "118": "BMP280" },
+    "dmesg_tail": [
+      "bmp280 1-0076: crc error",
+      "i2c-1: two slaves acked address 0x76"
+    ],
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "Two devices are answering 0x76 at once — both breakouts are strapped to the same address and are fighting on the bus. This is a hardware conflict: STOP coding, move one board's address jumper (or put it on the other bus) and rewire.",
+    "fix_applies": "",
+    "fix_must_contain": [],
+    "fix_must_not_have": [],
+    "is_hardware_fault": true
+  },
+  "hallucinated": ["dtparam", "0x77", "driver bug"]
+}

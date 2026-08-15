@@ -1,0 +1,21 @@
+{
+  "id": "1wire-overlay-wrong-gpio",
+  "archetype": "overlay-missing",
+  "symptom": "my DS18B20 never shows up under /sys/bus/w1/devices. The data wire is on GPIO17 but the default overlay wiring was used when the board was set up.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "gpio_pins": { "17": "1-wire data" },
+    "one_wire": [],
+    "files": {
+      "config.txt": "arm_64bit=1\ndtoverlay=w1-gpio\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "The w1-gpio overlay defaults to GPIO4; the data wire is on GPIO17. Set dtoverlay=w1-gpio,gpiopin=17.",
+    "fix_applies": "config.txt",
+    "fix_must_contain": ["gpiopin=17"],
+    "fix_must_not_have": []
+  },
+  "hallucinated": ["dtparam=i2c_arm=on"]
+}

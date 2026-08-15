@@ -1,0 +1,20 @@
+{
+  "id": "gpio-input-pullup-button",
+  "archetype": "gpio-input",
+  "symptom": "my button press is detected dozens of times per press and sometimes fires with nobody near it. It is wired between the pin and ground.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "gpio_pins": { "27": "button to GND" },
+    "files": {
+      "button.py": "from gpiozero import Button\nbutton = Button(27)\nbutton.wait_for_press()\nprint(\"pressed\")\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "A button to ground needs the internal pull-up plus debouncing: Button(27, pull_up=True, bounce_time=0.1).",
+    "fix_applies": "button.py",
+    "fix_must_contain": ["pull_up=True", "bounce_time"],
+    "fix_must_not_have": ["pull_up=False"]
+  },
+  "hallucinated": []
+}

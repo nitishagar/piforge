@@ -1,0 +1,21 @@
+{
+  "id": "iio-buffer-overflow",
+  "archetype": "iio-buffering",
+  "symptom": "sampling drops bursts: about one in three windows is missing samples and dmesg complains about the iio buffer.",
+  "setup": {
+    "board": "Raspberry Pi 5 Model B Rev 1.0",
+    "iio": [ { "name": "mcp3421", "raw": 13107, "scale": 0.0005 } ],
+    "dmesg_tail": ["iio-buffer: 12 samples dropped before watermark"],
+    "files": {
+      "adc_stream.py": "while True:\n    raw = int(open(\"/sys/bus/iio/devices/iio:device0/in_voltage0_raw\").read())\n    handle(raw)\n"
+    },
+    "throttled": "0x0"
+  },
+  "gold": {
+    "diagnosis": "One-shot reads cannot keep up; enable the triggered buffer with a watermark so the kernel batches samples instead of dropping them.",
+    "fix_applies": "adc_stream.py",
+    "fix_must_contain": ["watermark"],
+    "fix_must_not_have": []
+  },
+  "hallucinated": []
+}

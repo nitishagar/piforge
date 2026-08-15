@@ -59,3 +59,32 @@ fn resolve_chip_passes_configured_through() {
     assert_eq!(hil_hw::resolve_chip("gpiochip4").unwrap(), "gpiochip4");
     assert_eq!(hil_hw::resolve_chip("gpiochip0").unwrap(), "gpiochip0");
 }
+
+#[test]
+fn valid_i2c_addr_matches_scan_range() {
+    // Rejects the reserved/10-bit blocks and any `as u16` truncation residue;
+    // accepts exactly the range the bus scan walks.
+    assert!(!hil_hw::valid_i2c_addr(0x00));
+    assert!(!hil_hw::valid_i2c_addr(0x07));
+    assert!(hil_hw::valid_i2c_addr(0x08));
+    assert!(hil_hw::valid_i2c_addr(0x76));
+    assert!(hil_hw::valid_i2c_addr(0x77));
+    assert!(!hil_hw::valid_i2c_addr(0x78));
+    assert!(!hil_hw::valid_i2c_addr(0xffff));
+}
+
+#[test]
+fn scan_notice_shorted_bus_beats_timeout() {
+    // A shorted bus trips the 2 s budget AND answers everywhere: the shorted
+    // diagnosis must win over the (also true) timeout message.
+    let shorted = "many addresses responded — likely SDA/SCL shorted to power; STOP";
+    assert_eq!(hil_hw::scan_notice(41, true), Some(shorted));
+    assert_eq!(hil_hw::scan_notice(41, false), Some(shorted));
+    assert_eq!(hil_hw::scan_notice(40, true), Some("scan timed out"));
+    assert_eq!(hil_hw::scan_notice(3, true), Some("scan timed out"));
+    assert_eq!(
+        hil_hw::scan_notice(0, false),
+        Some("no devices — check dtparam=i2c_arm=on, wiring, pull-ups")
+    );
+    assert_eq!(hil_hw::scan_notice(3, false), None);
+}

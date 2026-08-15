@@ -684,6 +684,28 @@ fn smbus_quick(file: &std::fs::File, addr: u16) -> bool {
     unsafe { i2c_ioctl::i2c_smbus(fd, &mut data) }.is_ok()
 }
 
+/// Scan-outcome notice. The shorted-bus diagnosis takes precedence over the
+/// timeout message: a shorted bus trips the 2 s budget AND answers on most
+/// addresses, and "shorted" is the actionable finding.
+pub fn scan_notice(found: usize, timed_out: bool) -> Option<&'static str> {
+    if found > 40 {
+        Some("many addresses responded — likely SDA/SCL shorted to power; STOP")
+    } else if timed_out {
+        Some("scan timed out")
+    } else if found == 0 {
+        Some("no devices — check dtparam=i2c_arm=on, wiring, pull-ups")
+    } else {
+        None
+    }
+}
+
+/// Valid 7-bit user-space I2C addresses — the same range the bus scan walks.
+/// Rejecting here also stops `as u16` truncation from silently targeting a
+/// different device.
+pub fn valid_i2c_addr(a: u16) -> bool {
+    (0x08..=0x77).contains(&a)
+}
+
 fn scan_bus_blocking(path: &Path) -> Result<(Vec<u8>, Option<String>), String> {
     let file = open_i2c(path)?;
     let start = Instant::now();
@@ -698,15 +720,7 @@ fn scan_bus_blocking(path: &Path) -> Result<(Vec<u8>, Option<String>), String> {
             break;
         }
     }
-    let notice = if timed_out {
-        Some("scan timed out".into())
-    } else if found.len() > 40 {
-        Some("many addresses responded — likely SDA/SCL shorted to power; STOP".into())
-    } else if found.is_empty() {
-        Some("no devices — check dtparam=i2c_arm=on, wiring, pull-ups".into())
-    } else {
-        None
-    };
+    let notice = scan_notice(found.len(), timed_out).map(str::to_string);
     Ok((found, notice))
 }
 
@@ -783,15 +797,29 @@ impl Tool for I2cTool {
                 }
                 Err(e) => ToolResult::err("i2c", e),
             },
-            "detect" => match self.bus.detect(addr).await {
-                Ok(true) => ToolResult::ok(
-                    "i2c",
-                    json!({"address":format!("0x{addr:02x}"),"present":true}),
-                ),
-                Ok(false) => ToolResult::err("i2c", format!("no device at 0x{addr:02x}")),
-                Err(e) => ToolResult::err("i2c", e),
-            },
+            "detect" => {
+                if !valid_i2c_addr(addr) {
+                    return ToolResult::err(
+                        "i2c",
+                        format!("address 0x{addr:02x} outside valid range 0x08-0x77"),
+                    );
+                }
+                match self.bus.detect(addr).await {
+                    Ok(true) => ToolResult::ok(
+                        "i2c",
+                        json!({"address":format!("0x{addr:02x}"),"present":true}),
+                    ),
+                    Ok(false) => ToolResult::err("i2c", format!("no device at 0x{addr:02x}")),
+                    Err(e) => ToolResult::err("i2c", e),
+                }
+            }
             "read" => {
+                if !valid_i2c_addr(addr) {
+                    return ToolResult::err(
+                        "i2c",
+                        format!("address 0x{addr:02x} outside valid range 0x08-0x77"),
+                    );
+                }
                 let reg = args.get("register").and_then(|v| v.as_i64()).unwrap_or(0) as u8;
                 let n = args
                     .get("length")

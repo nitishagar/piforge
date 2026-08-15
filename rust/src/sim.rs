@@ -23,7 +23,6 @@ struct StateInner {
     gpio: HashMap<i32, Pin>,
     dmesg_tail: Vec<String>,
     throttled: u64,
-    files: HashMap<String, String>,
     one_wire: Vec<String>,
     iio: Vec<IioDevice>,
 }
@@ -154,7 +153,6 @@ impl State {
                 gpio,
                 dmesg_tail: s.dmesg_tail,
                 throttled: parse_hex(&s.throttled),
-                files: s.files,
                 one_wire: s.one_wire,
                 iio: s.iio,
             }),
@@ -438,6 +436,19 @@ impl Tool for GPIOTool {
     async fn execute(&self, args: &Value) -> ToolResult {
         let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("get");
         let pin = args.get("pin").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let value = args.get("value").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        // Class I gate BEFORE the state lock: the broker's under-voltage check
+        // re-locks this same State — gating under the lock self-deadlocks.
+        if action == "set" {
+            if value != 0 && value != 1 {
+                return ToolResult::err("gpio", "value must be 0 or 1");
+            }
+            if let Some(g) = &self.gate {
+                if let Err(e) = g.allow("gpio_set", json!({"pin":pin,"value":value})) {
+                    return ToolResult::err("gpio", format!("DENIED by safety gate: {e}"));
+                }
+            }
+        }
         let mut s = self.st.inner.lock();
         match action {
             "get" => match s.gpio.get(&pin) {
@@ -449,15 +460,6 @@ impl Tool for GPIOTool {
                 None => ToolResult::err("gpio", format!("pin {pin} not in profile")),
             },
             "set" => {
-                let value = args.get("value").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-                if value != 0 && value != 1 {
-                    return ToolResult::err("gpio", "value must be 0 or 1");
-                }
-                if let Some(g) = &self.gate {
-                    if let Err(e) = g.allow("gpio_set", json!({"pin":pin,"value":value})) {
-                        return ToolResult::err("gpio", format!("DENIED by safety gate: {e}"));
-                    }
-                }
                 if !s.gpio.contains_key(&pin) {
                     return ToolResult::err("gpio", format!("pin {pin} not in profile"));
                 }
@@ -569,7 +571,7 @@ impl Tool for CodeEditTool {
 /// Resolve a relative path under root, rejecting traversal + symlink escapes.
 /// Evaluates symlinks; uses a path-separator boundary for the ".." check.
 fn safe_join(root: &str, rel: &str) -> Result<std::path::PathBuf, String> {
-    use std::path::{Component, PathBuf};
+    use std::path::Component;
     if std::path::Path::new(rel).is_absolute() {
         return Err("path must be relative to workspace root".into());
     }

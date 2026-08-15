@@ -409,7 +409,9 @@ impl Drop for WorkspaceGuard {
 }
 
 fn sanitize_case_id(id: &str) -> String {
-    let s: String = id
+    // ASCII-only output (dots/slashes already mapped away) + a length cap:
+    // the result is embedded in temp paths and trace filenames.
+    let mut s: String = id
         .chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
@@ -419,6 +421,7 @@ fn sanitize_case_id(id: &str) -> String {
             }
         })
         .collect();
+    s.truncate(64);
     if s.is_empty() {
         "unknown".into()
     } else {
@@ -574,5 +577,24 @@ mod script_invariants {
             chip_blob.contains("\"register\":208") || chip_blob.contains("0xD0"),
             "chip-id script must read register 0xD0, got {chip_blob}"
         );
+    }
+}
+
+#[cfg(test)]
+mod diagnosis_matching {
+    use super::contains_diagnosis;
+
+    #[test]
+    fn word_phrases_do_not_overmatch() {
+        // The regression this matcher exists for: substrings of unrelated
+        // words must NOT trip the diagnosis phrases.
+        assert!(!contains_diagnosis("the default config is powered off"));
+        assert!(!contains_diagnosis("wired network interface is down"));
+        // Positive controls.
+        assert!(contains_diagnosis("this is a hardware fault — stop"));
+        assert!(contains_diagnosis("check the power supply"));
+        assert!(contains_diagnosis("under-voltage detected"));
+        assert!(contains_diagnosis("shorted to power"));
+        assert!(contains_diagnosis("stop coding and rewire"));
     }
 }

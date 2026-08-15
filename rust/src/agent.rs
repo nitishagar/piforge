@@ -98,6 +98,8 @@ impl std::error::Error for RunError {}
 
 /// Append-only trace event (one JSONL line per event). The frozen prompt is
 /// recorded as a hash, never a body; the sink owner stamps case identity.
+/// Traces contain tool output (sensor reads, file contents, dmesg) — local
+/// run artifacts only: never share or commit them.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "event", rename_all = "snake_case")]
 pub enum TraceEvent {

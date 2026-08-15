@@ -350,6 +350,8 @@ async fn trace_jsonl_records_run_lifecycle() {
         let mut saw_start = false;
         let mut saw_call = false;
         let mut saw_result = false;
+        let mut saw_usage = false;
+        let mut saw_text = false;
         let mut terminal = None;
         for line in text.lines() {
             let v: serde_json::Value = serde_json::from_str(line)
@@ -366,6 +368,8 @@ async fn trace_jsonl_records_run_lifecycle() {
                 }
                 "tool_called" => saw_call = true,
                 "tool_result" => saw_result = true,
+                "turn_usage" => saw_usage = true,
+                "assistant_text" => saw_text = true,
                 "run_finished" | "run_error" => {
                     terminal = Some(v["event"].as_str().unwrap().to_string())
                 }
@@ -376,6 +380,12 @@ async fn trace_jsonl_records_run_lifecycle() {
         assert!(
             saw_call && saw_result,
             "{}: tool lifecycle recorded",
+            entry.path().display()
+        );
+        assert!(saw_usage, "{}: turn usage recorded", entry.path().display());
+        assert!(
+            saw_text,
+            "{}: assistant text recorded",
             entry.path().display()
         );
         assert_eq!(
@@ -415,4 +425,200 @@ async fn trace_sink_is_behavior_neutral() {
         assert_eq!(a.pass_, b.pass_, "{}", a.case_id);
         assert_eq!(a.cache_hit_rate, b.cache_hit_rate, "{}", a.case_id);
     }
+}
+
+// ---- scorer + trace edge coverage (crafted fixture variants) ----
+
+/// Copy a corpus fixture into `dir`, mutating its JSON — drives scorer paths
+/// the healthy corpus (by design) never trips.
+fn write_case_variant(
+    dir: &std::path::Path,
+    id: &str,
+    mutate: impl FnOnce(&mut serde_json::Value),
+) {
+    let src = format!("{}/../eval/cases/{}.json", env!("CARGO_MANIFEST_DIR"), id);
+    let mut v: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&src).unwrap()).unwrap();
+    mutate(&mut v);
+    std::fs::write(dir.join(format!("{id}.json")), v.to_string()).unwrap();
+}
+
+fn temp_root(tag: &str) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!("piforge-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    root
+}
+
+#[tokio::test]
+async fn hallucination_flag_is_substring_of_final_text() {
+    let _lock = EVAL_RUN_LOCK.lock().unwrap();
+    let root = temp_root("halluc");
+    // The script's terminal text contains "0x76" — make it a hallucination.
+    write_case_variant(&root, "wrong-i2c-address-bme280-0x76", |v| {
+        v["hallucinated"] = serde_json::json!(["0x76"]);
+    });
+    let (runner, _m) = Runner::new_mock(12, false);
+    let vs = runner
+        .run_all(root.to_str().unwrap(), |_| ())
+        .await
+        .unwrap();
+    assert_eq!(vs.len(), 1);
+    assert!(vs[0].hallucination, "hallucinated substring must flag");
+    assert!(vs[0].pass_, "the flag alone does not fail the case");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[tokio::test]
+async fn scorer_rejects_forbidden_content_in_edited_file() {
+    let _lock = EVAL_RUN_LOCK.lock().unwrap();
+    let root = temp_root("forbidden");
+    // The gold edit contains "0x76" — forbid it and the case must fail.
+    write_case_variant(&root, "wrong-i2c-address-bme280-0x76", |v| {
+        v["gold"]["fix_must_not_have"] = serde_json::json!(["0x76"]);
+    });
+    let (runner, _m) = Runner::new_mock(12, false);
+    let vs = runner
+        .run_all(root.to_str().unwrap(), |_| ())
+        .await
+        .unwrap();
+    assert_eq!(vs.len(), 1);
+    assert!(
+        !vs[0].pass_,
+        "forbidden content in the edited file must fail"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[tokio::test]
+async fn hardware_fault_gold_with_edits_cannot_pass() {
+    let _lock = EVAL_RUN_LOCK.lock().unwrap();
+    let root = temp_root("stopwithedits");
+    // Same scripted edits, but the gold says hardware fault: pass requires
+    // phrase match AND edit_count == 0 — the edits alone must sink it.
+    write_case_variant(&root, "wrong-i2c-address-bme280-0x76", |v| {
+        v["gold"] = serde_json::json!({
+            "is_hardware_fault": true,
+            "fix_applies": "",
+            "fix_must_contain": []
+        });
+    });
+    let (runner, _m) = Runner::new_mock(12, false);
+    let vs = runner
+        .run_all(root.to_str().unwrap(), |_| ())
+        .await
+        .unwrap();
+    assert_eq!(vs.len(), 1);
+    assert!(!vs[0].pass_, "a STOP case with edits can never pass");
+    assert!(!vs[0].partial, "terminal text carries no diagnosis phrase");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[tokio::test]
+async fn stop_case_passes_despite_hallucination_flag() {
+    let _lock = EVAL_RUN_LOCK.lock().unwrap();
+    let root = temp_root("stopplusflag");
+    // STOP gold, correct triage, no edits: pass — even with the flag set.
+    write_case_variant(&root, "i2c-bus-scan-all-addresses", |v| {
+        v["hallucinated"] = serde_json::json!(["STOP"]);
+    });
+    let (runner, _m) = Runner::new_mock(12, false);
+    let vs = runner
+        .run_all(root.to_str().unwrap(), |_| ())
+        .await
+        .unwrap();
+    assert_eq!(vs.len(), 1);
+    assert!(vs[0].pass_, "phrase + zero edits passes");
+    assert!(vs[0].hallucination, "flag is independent of pass");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[tokio::test]
+async fn errored_case_trace_survives_to_error_point() {
+    let _lock = EVAL_RUN_LOCK.lock().unwrap();
+    let dir = temp_root("trace-err");
+    let runner = Runner::new(Arc::new(FailingClient) as Arc<dyn LlmClient>, 4, false);
+    let runner = runner.with_trace_dir(dir.clone());
+    let vs = runner.run_all(&shared_cases_dir(), |_| ()).await.unwrap();
+    assert!(vs
+        .iter()
+        .all(|v| v.error_kind == Some(CaseError::ProviderFailure)));
+    let files: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(files.len(), vs.len());
+    for entry in files {
+        let text = std::fs::read_to_string(entry.path()).unwrap();
+        let mut lines = text.lines();
+        let first: serde_json::Value = serde_json::from_str(lines.next().unwrap()).unwrap();
+        assert_eq!(first["event"], "run_started", "{}", entry.path().display());
+        let last: serde_json::Value = serde_json::from_str(text.lines().last().unwrap()).unwrap();
+        assert_eq!(
+            last["event"],
+            "run_error",
+            "{}: errored case keeps a partial trace ending at the error",
+            entry.path().display()
+        );
+        assert!(!text.contains("run_finished"));
+    }
+    assert!(runner.degraded_traces().is_empty());
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn trace_write_failure_degrades_without_failing_cases() {
+    let _lock = EVAL_RUN_LOCK.lock().unwrap();
+    // A FILE where the trace dir should be: every per-case create fails with
+    // ENOTDIR — the run must stay green and the degradation must be reported.
+    let blocker = std::env::temp_dir().join(format!("piforge-trace-block-{}", std::process::id()));
+    std::fs::write(&blocker, b"not a dir").unwrap();
+    let (runner, _m) = Runner::new_mock(12, false);
+    let runner = runner.with_trace_dir(blocker.clone());
+    let vs = runner.run_all(&shared_cases_dir(), |_| ()).await.unwrap();
+    assert!(
+        vs.iter().all(|v| v.pass_),
+        "trace failure must not fail cases"
+    );
+    assert!(!runner.degraded_traces().is_empty());
+    let _ = std::fs::remove_file(&blocker);
+}
+
+// Binary-level exit contract: the mock-parity bail must actually fire.
+#[test]
+fn mock_exit_contract_fails_on_failing_case() {
+    use std::process::Command;
+    let root = temp_root("contract");
+    std::fs::write(
+        root.join("bad.json"),
+        r#"{
+          "id": "malformed-empty-fix",
+          "symptom": "unused",
+          "setup": { "throttled": "0x0" },
+          "gold": { "is_hardware_fault": false, "fix_applies": "", "fix_must_contain": [] }
+        }"#,
+    )
+    .unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_piforge-eval"))
+        .args(["--mock", "--config", "none", "--cases"])
+        .arg(&root)
+        .output()
+        .expect("run piforge-eval --mock (failing)");
+    assert!(
+        !out.status.success(),
+        "a failing mock case must exit non-zero; stdout={}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("mock parity violated"), "{err}");
+    // Healthy corpus: exit 0 + BUILD_LOCAL (the CI success path, pinned).
+    let good = format!("{}/../eval/cases", env!("CARGO_MANIFEST_DIR"));
+    let out = Command::new(env!("CARGO_BIN_EXE_piforge-eval"))
+        .args(["--mock", "--config", "none", "--cases"])
+        .arg(&good)
+        .output()
+        .expect("run piforge-eval --mock (healthy)");
+    assert!(out.status.success());
+    assert!(String::from_utf8_lossy(&out.stdout).contains("DECISION: BUILD_LOCAL"));
+    let _ = std::fs::remove_dir_all(&root);
 }

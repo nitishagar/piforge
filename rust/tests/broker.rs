@@ -171,3 +171,32 @@ fn stdin_confirmer_denies_non_tty_without_read() {
     let f = Broker::stdin_confirmer();
     assert!(!f("approve?"));
 }
+
+#[test]
+fn under_voltage_blocks_before_confirm_in_confirm_mode() {
+    // EG1 in the confirm arm too: an over-permissive human (always-yes
+    // confirmer) must STILL be refused when UV is active, without prompting.
+    let cfg = SafetyConfig {
+        arm_mode: "confirm".into(),
+        stop_on_under_voltage: true,
+    };
+    let asked = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    let a2 = asked.clone();
+    let g = Broker::new(
+        cfg,
+        Some(stub(true, true, false)),
+        Arc::new(move |_| {
+            a2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            true
+        }),
+    );
+    let err = g
+        .allow("gpio_set", json!({"pin":17,"value":1}))
+        .unwrap_err();
+    assert!(err.contains("under-voltage"), "{err}");
+    assert_eq!(
+        asked.load(std::sync::atomic::Ordering::SeqCst),
+        0,
+        "UV check must precede the confirm prompt"
+    );
+}
